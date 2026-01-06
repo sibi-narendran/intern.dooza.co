@@ -12,6 +12,7 @@ const Chat = () => {
 
     useEffect(() => {
         if (intern) {
+            document.title = `${intern.name} | Dooza Intern`;
             setMessages([{
                 id: 1,
                 sender: 'ai',

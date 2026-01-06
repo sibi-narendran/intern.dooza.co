@@ -1,9 +1,14 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageSquare, MoreHorizontal } from 'lucide-react';
 import { interns } from '../data/interns';
 
 const Dashboard = () => {
     const navigate = useNavigate();
+
+    useEffect(() => {
+        document.title = 'Dashboard | Dooza Intern';
+    }, []);
 
     return (
         <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--gray-50)' }}>
