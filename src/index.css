@@ -86,6 +86,35 @@ body {
 }
 
 /* ======================
+   Navbar
+   ====================== */
+
+.navbar {
+    height: 64px;
+    background: white;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 100;
+}
+
+.navbar__left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.navbar__right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ======================
    Loading & Auth States
    ====================== */
 
@@ -198,18 +227,195 @@ body {
 }
 
 /* ======================
-   User Menu
+   Profile Menu (Navbar)
    ====================== */
 
-.user-menu {
+.profile-menu {
     position: relative;
 }
 
-.user-menu__trigger {
+.profile-menu__trigger {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    justify-content: center;
+    padding: 4px;
+    border: 2px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.profile-menu__trigger:hover {
+    background: var(--gray-100);
+}
+
+.profile-menu__trigger--active {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 2px var(--primary-100);
+}
+
+.profile-menu__avatar-wrapper {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.profile-menu__avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.profile-menu__avatar--initials {
+    background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.profile-menu__status {
+    position: absolute;
+    bottom: 1px;
+    right: 1px;
+    width: 10px;
+    height: 10px;
+    background: #22c55e;
+    border: 2px solid white;
+    border-radius: 50%;
+}
+
+/* Backdrop for click-outside */
+.profile-menu__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+}
+
+/* Dropdown - opens DOWNWARD for navbar */
+.profile-menu__dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 280px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 
+        0 10px 40px rgba(0, 0, 0, 0.12),
+        0 0 0 1px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    z-index: 1000;
+    animation: profileDropdown 0.2s ease-out;
+    transform-origin: top right;
+}
+
+@keyframes profileDropdown {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.profile-menu__header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, var(--gray-50), white);
+}
+
+.profile-menu__header-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.profile-menu__header-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-menu__header-avatar-initials {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.profile-menu__header-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.profile-menu__header-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--gray-900);
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.profile-menu__header-email {
+    font-size: 13px;
+    color: var(--gray-500);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.profile-menu__org-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 12px;
+    padding: 10px 12px;
+    background: var(--gray-50);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--gray-600);
+    font-weight: 500;
+}
+
+.profile-menu__org-section svg {
+    color: var(--gray-400);
+    flex-shrink: 0;
+}
+
+.profile-menu__divider {
+    height: 1px;
+    background: var(--gray-100);
+    margin: 8px 0;
+}
+
+.profile-menu__items {
+    padding: 4px 8px;
+}
+
+.profile-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
     width: 100%;
     border: none;
     background: transparent;
@@ -219,156 +425,50 @@ body {
     font-weight: 500;
     border-radius: 8px;
     transition: all 0.15s ease;
-}
-
-.user-menu__trigger:hover,
-.user-menu__trigger--active {
-    background: white;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.user-menu__avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    object-fit: cover;
-}
-
-.user-menu__avatar--initials {
-    background: linear-gradient(135deg, var(--primary-500), var(--primary-700));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.user-menu__name {
-    flex: 1;
     text-align: left;
-    font-weight: 600;
-    color: var(--gray-800);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
-.user-menu__chevron {
+.profile-menu__item svg {
     color: var(--gray-400);
-    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    transition: color 0.15s ease;
 }
 
-.user-menu__chevron--open {
-    transform: rotate(180deg);
+.profile-menu__item span {
+    flex: 1;
 }
 
-.user-menu__dropdown {
-    position: absolute;
-    bottom: 100%;
-    left: 0;
-    right: 0;
-    margin-bottom: 8px;
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
-    overflow: hidden;
-    z-index: 1000;
-    animation: slideUp 0.15s ease-out;
-}
-
-@keyframes slideUp {
-    from {
-        opacity: 0;
-        transform: translateY(8px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.user-menu__header {
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--gray-100);
-}
-
-.user-menu__header-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--gray-800);
-    margin-bottom: 2px;
-}
-
-.user-menu__header-email {
-    font-size: 12px;
-    color: var(--gray-500);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.user-menu__org {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--gray-500);
-    background: var(--gray-50);
-    padding: 6px 8px;
-    border-radius: 6px;
-    margin-top: 8px;
-}
-
-.user-menu__org-name {
-    font-weight: 500;
-}
-
-.user-menu__items {
-    padding: 6px;
-}
-
-.user-menu__item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    width: 100%;
-    border: none;
-    background: transparent;
-    color: var(--gray-700);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    border-radius: 6px;
-    transition: background 0.1s;
-}
-
-.user-menu__item:hover {
+.profile-menu__item:hover {
     background: var(--gray-50);
 }
 
-.user-menu__item--danger {
+.profile-menu__item:hover svg {
+    color: var(--gray-600);
+}
+
+.profile-menu__item:active {
+    background: var(--gray-100);
+}
+
+.profile-menu__item--danger {
     color: #dc2626;
 }
 
-.user-menu__item--danger:hover {
+.profile-menu__item--danger svg {
+    color: #dc2626;
+}
+
+.profile-menu__item--danger:hover {
     background: #fef2f2;
 }
 
-.user-menu__item-icon {
-    color: var(--gray-500);
+.profile-menu__item--danger:hover svg {
+    color: #dc2626;
 }
 
-.user-menu__item-external {
+.profile-menu__item-external {
+    color: var(--gray-300) !important;
     margin-left: auto;
-    color: var(--gray-400);
-}
-
-.user-menu__divider {
-    height: 1px;
-    background: var(--gray-100);
-    margin: 6px 0;
 }
 
 /* ======================

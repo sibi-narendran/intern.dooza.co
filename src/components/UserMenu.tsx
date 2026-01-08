@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { LogOut, Settings, ExternalLink, ChevronDown, Building2 } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { LogOut, Settings, ExternalLink, Building2, User } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const UserMenu = () => {
@@ -7,24 +7,38 @@ const UserMenu = () => {
   const [isOpen, setIsOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  const closeMenu = useCallback(() => setIsOpen(false), [])
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false)
+        closeMenu()
       }
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenu()
+    }
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('keydown', handleEscape)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen, closeMenu])
 
   const handleAccountSettings = () => {
     const accountsUrl = import.meta.env.VITE_ACCOUNTS_URL || 'https://accounts.dooza.ai'
     window.open(`${accountsUrl}/settings`, '_blank')
-    setIsOpen(false)
+    closeMenu()
   }
 
   const handleLogout = async () => {
-    setIsOpen(false)
+    closeMenu()
     await signOut()
   }
 
@@ -64,55 +78,90 @@ const UserMenu = () => {
   }
 
   return (
-    <div className="user-menu" ref={menuRef}>
+    <div className="profile-menu" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`user-menu__trigger ${isOpen ? 'user-menu__trigger--active' : ''}`}
+        className={`profile-menu__trigger ${isOpen ? 'profile-menu__trigger--active' : ''}`}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label="Profile menu"
       >
-        {getAvatarUrl() ? (
-          <img src={getAvatarUrl()!} alt="Profile" className="user-menu__avatar" />
-        ) : (
-          <div className="user-menu__avatar user-menu__avatar--initials">
-            {getInitials()}
-          </div>
-        )}
-        
-        <span className="user-menu__name">{getUserDisplayName()}</span>
-        
-        <ChevronDown 
-          size={16} 
-          className={`user-menu__chevron ${isOpen ? 'user-menu__chevron--open' : ''}`}
-        />
+        <div className="profile-menu__avatar-wrapper">
+          {getAvatarUrl() ? (
+            <img src={getAvatarUrl()!} alt="" className="profile-menu__avatar" />
+          ) : (
+            <div className="profile-menu__avatar profile-menu__avatar--initials">
+              {getInitials()}
+            </div>
+          )}
+          <span className="profile-menu__status" />
+        </div>
       </button>
 
       {isOpen && (
-        <div className="user-menu__dropdown">
-          <div className="user-menu__header">
-            <div className="user-menu__header-name">{getUserDisplayName()}</div>
-            <div className="user-menu__header-email">{getUserEmail()}</div>
+        <>
+          <div className="profile-menu__backdrop" onClick={closeMenu} />
+          <div className="profile-menu__dropdown" role="menu">
+            <div className="profile-menu__header">
+              <div className="profile-menu__header-avatar">
+                {getAvatarUrl() ? (
+                  <img src={getAvatarUrl()!} alt="" />
+                ) : (
+                  <div className="profile-menu__header-avatar-initials">
+                    {getInitials()}
+                  </div>
+                )}
+              </div>
+              <div className="profile-menu__header-info">
+                <div className="profile-menu__header-name">{getUserDisplayName()}</div>
+                <div className="profile-menu__header-email">{getUserEmail()}</div>
+              </div>
+            </div>
+
             {currentOrg?.name && (
-              <div className="user-menu__org">
-                <Building2 size={12} />
-                <span className="user-menu__org-name">{currentOrg.name}</span>
+              <div className="profile-menu__org-section">
+                <Building2 size={14} />
+                <span>{currentOrg.name}</span>
               </div>
             )}
+
+            <div className="profile-menu__divider" />
+
+            <div className="profile-menu__items" role="group">
+              <button 
+                onClick={handleAccountSettings} 
+                className="profile-menu__item"
+                role="menuitem"
+              >
+                <User size={16} />
+                <span>My Profile</span>
+              </button>
+
+              <button 
+                onClick={handleAccountSettings} 
+                className="profile-menu__item"
+                role="menuitem"
+              >
+                <Settings size={16} />
+                <span>Account Settings</span>
+                <ExternalLink size={12} className="profile-menu__item-external" />
+              </button>
+            </div>
+
+            <div className="profile-menu__divider" />
+
+            <div className="profile-menu__items" role="group">
+              <button 
+                onClick={handleLogout} 
+                className="profile-menu__item profile-menu__item--danger"
+                role="menuitem"
+              >
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </div>
-
-          <div className="user-menu__items">
-            <button onClick={handleAccountSettings} className="user-menu__item">
-              <Settings size={16} className="user-menu__item-icon" />
-              Account Settings
-              <ExternalLink size={12} className="user-menu__item-external" />
-            </button>
-
-            <div className="user-menu__divider" />
-
-            <button onClick={handleLogout} className="user-menu__item user-menu__item--danger">
-              <LogOut size={16} />
-              Sign Out
-            </button>
-          </div>
-        </div>
+        </>
       )}
     </div>
   )
