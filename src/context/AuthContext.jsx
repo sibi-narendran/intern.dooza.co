@@ -80,21 +80,48 @@ export const AuthProvider = ({ children }) => {
   }
 
   useEffect(() => {
+    let isMounted = true
+    
+    // Timeout to prevent infinite loading - redirect after 10 seconds
+    const timeout = setTimeout(() => {
+      if (isMounted && loading) {
+        console.error('Auth check timed out after 10 seconds')
+        setLoading(false)
+        setUser(null)
+      }
+    }, 10000)
+
     // Get initial session
     const getSession = async () => {
       try {
+        console.log('[Auth] Checking session...')
         const { data: { session }, error } = await supabase.auth.getSession()
+        
         if (error) {
-          console.error('Error getting session:', error)
+          console.error('[Auth] Error getting session:', error)
+          if (isMounted) {
+            setUser(null)
+            setLoading(false)
+          }
+          return
         }
+        
         const authUser = session?.user ?? null
-        setUser(authUser)
-        await fetchProfileData(authUser)
+        console.log('[Auth] Session found:', authUser ? `User: ${authUser.email}` : 'No user')
+        
+        if (isMounted) {
+          setUser(authUser)
+          if (authUser) {
+            await fetchProfileData(authUser)
+          }
+          setLoading(false)
+        }
       } catch (err) {
-        console.error('Failed to get session:', err)
-        setUser(null)
-      } finally {
-        setLoading(false)
+        console.error('[Auth] Failed to get session:', err)
+        if (isMounted) {
+          setUser(null)
+          setLoading(false)
+        }
       }
     }
 
@@ -103,14 +130,21 @@ export const AuthProvider = ({ children }) => {
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('[Auth] State change:', event)
+        if (!isMounted) return
+        
         const authUser = session?.user ?? null
         setUser(authUser)
-        await fetchProfileData(authUser)
+        if (authUser) {
+          await fetchProfileData(authUser)
+        }
         setLoading(false)
       }
     )
 
     return () => {
+      isMounted = false
+      clearTimeout(timeout)
       subscription?.unsubscribe()
     }
   }, [])
