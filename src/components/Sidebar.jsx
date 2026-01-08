@@ -2,7 +2,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { LayoutGrid, Plus } from 'lucide-react';
 import { agents } from '../data/agents';
 import logo from '../assets/logo.png';
-import UserMenu from './UserMenu';
 
 const Sidebar = () => {
     const location = useLocation();
@@ -70,11 +69,6 @@ const Sidebar = () => {
                     ))}
                 </div>
             </nav>
-
-            {/* Footer - User Menu */}
-            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                <UserMenu />
-            </div>
         </aside>
     );
 };
