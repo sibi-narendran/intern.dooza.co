@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { LayoutGrid, Plus, Settings } from 'lucide-react';
-import { interns } from '../data/interns';
+import { agents } from '../data/agents';
 import logo from '../assets/logo.png';
 
 const Sidebar = () => {
@@ -21,7 +21,7 @@ const Sidebar = () => {
             {/* Brand */}
             <div style={{ marginBottom: '32px', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <img src={logo} alt="Dooza Logo" style={{ width: '28px', height: '28px' }} />
-                <span style={{ fontWeight: '700', fontSize: '18px' }}>Dooza <span style={{ color: 'var(--primary-600)' }}>Intern</span></span>
+                <span style={{ fontWeight: '700', fontSize: '18px' }}>Dooza <span style={{ color: 'var(--primary-600)' }}>agent</span></span>
             </div>
 
             {/* Main Nav */}
@@ -48,23 +48,23 @@ const Sidebar = () => {
                         <Plus size={14} color="var(--gray-400)" cursor="pointer" />
                     </div>
 
-                    {interns.map(intern => (
-                        <Link key={intern.id} to={`/chat/${intern.id}`} style={{
+                    {agents.map(agent => (
+                        <Link key={agent.id} to={`/chat/${agent.id}`} style={{
                             display: 'flex', alignItems: 'center', gap: '10px',
                             padding: '8px 12px', borderRadius: '8px', textDecoration: 'none',
                             marginBottom: '2px',
-                            background: isActive(`/chat/${intern.id}`) ? 'white' : 'transparent',
-                            color: isActive(`/chat/${intern.id}`) ? 'var(--gray-900)' : 'var(--gray-600)',
-                            boxShadow: isActive(`/chat/${intern.id}`) ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                            background: isActive(`/chat/${agent.id}`) ? 'white' : 'transparent',
+                            color: isActive(`/chat/${agent.id}`) ? 'var(--gray-900)' : 'var(--gray-600)',
+                            boxShadow: isActive(`/chat/${agent.id}`) ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
                             transition: 'all 0.1s'
                         }}>
                             <img
-                                src={intern.avatar}
-                                alt={intern.name}
+                                src={agent.avatar}
+                                alt={agent.name}
                                 style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover' }}
                             />
-                            <span style={{ fontSize: '14px', fontWeight: isActive(`/chat/${intern.id}`) ? '600' : '500' }}>{intern.name}</span>
-                            {isActive(`/chat/${intern.id}`) && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', marginLeft: 'auto' }}></div>}
+                            <span style={{ fontSize: '14px', fontWeight: isActive(`/chat/${agent.id}`) ? '600' : '500' }}>{agent.name}</span>
+                            {isActive(`/chat/${agent.id}`) && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', marginLeft: 'auto' }}></div>}
                         </Link>
                     ))}
                 </div>

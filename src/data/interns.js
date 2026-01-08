@@ -1,4 +1,4 @@
-export const interns = [
+export const agents = [
     {
         id: 'pam',
         name: 'Pam',

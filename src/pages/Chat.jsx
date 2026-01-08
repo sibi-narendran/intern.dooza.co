@@ -1,31 +1,31 @@
 import { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Send, Paperclip, MoreVertical, Phone } from 'lucide-react';
-import { interns } from '../data/interns';
+import { agents } from '../data/agents';
 
 const Chat = () => {
     const { id } = useParams();
-    const intern = interns.find(i => i.id === id);
+    const agent = agents.find(i => i.id === id);
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const endRef = useRef(null);
 
     useEffect(() => {
-        if (intern) {
-            document.title = `${intern.name} | Dooza Intern`;
+        if (agent) {
+            document.title = `${agent.name} | Dooza agent`;
             setMessages([{
                 id: 1,
                 sender: 'ai',
-                text: `Hi there! I'm ${intern.name}. How can I help you with your ${intern.role.toLowerCase()} needs today?`
+                text: `Hi there! I'm ${agent.name}. How can I help you with your ${agent.role.toLowerCase()} needs today?`
             }]);
         }
-    }, [id, intern]);
+    }, [id, agent]);
 
     useEffect(() => {
         endRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    if (!intern) return <div>Intern not found</div>;
+    if (!agent) return <div>agent not found</div>;
 
     const handleSend = (e) => {
         e.preventDefault();
@@ -55,8 +55,8 @@ const Chat = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ position: 'relative' }}>
                         <img
-                            src={intern.avatar}
-                            alt={intern.name}
+                            src={agent.avatar}
+                            alt={agent.name}
                             style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover' }}
                         />
                         <div style={{
@@ -66,8 +66,8 @@ const Chat = () => {
                         }}></div>
                     </div>
                     <div>
-                        <h2 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--gray-900)' }}>{intern.name}</h2>
-                        <p style={{ fontSize: '12px', color: 'var(--gray-500)' }}>{intern.role} • <span style={{ color: '#22c55e' }}>Online</span></p>
+                        <h2 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--gray-900)' }}>{agent.name}</h2>
+                        <p style={{ fontSize: '12px', color: 'var(--gray-500)' }}>{agent.role} • <span style={{ color: '#22c55e' }}>Online</span></p>
                     </div>
                 </div>
 
@@ -91,8 +91,8 @@ const Chat = () => {
                     }}>
                         {msg.sender === 'ai' && (
                             <img
-                                src={intern.avatar}
-                                alt={intern.name}
+                                src={agent.avatar}
+                                alt={agent.name}
                                 style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
                             />
                         )}
@@ -132,7 +132,7 @@ const Chat = () => {
                     <input
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder={`Message ${intern.name}...`}
+                        placeholder={`Message ${agent.name}...`}
                         style={{
                             flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: '15px'
                         }}

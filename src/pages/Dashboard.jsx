@@ -1,13 +1,13 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageSquare, MoreHorizontal } from 'lucide-react';
-import { interns } from '../data/interns';
+import { agents } from '../data/agents';
 
 const Dashboard = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        document.title = 'Dashboard | Dooza Intern';
+        document.title = 'Dashboard | Dooza agent';
     }, []);
 
     return (
@@ -18,7 +18,7 @@ const Dashboard = () => {
                     <p style={{ color: 'var(--gray-500)' }}>Your AI staff is ready to work.</p>
                 </div>
                 <button className="btn btn-primary">
-                    + New Custom Intern
+                    + New Custom agent
                 </button>
             </header>
 
@@ -29,8 +29,8 @@ const Dashboard = () => {
                 gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
                 gap: '24px'
             }}>
-                {interns.map((intern) => (
-                    <div key={intern.id} style={{
+                {agents.map((agent) => (
+                    <div key={agent.id} style={{
                         background: 'white',
                         borderRadius: '16px',
                         padding: '24px',
@@ -42,7 +42,7 @@ const Dashboard = () => {
                         justifyContent: 'space-between',
                         height: '100%'
                     }}
-                        onClick={() => navigate(`/chat/${intern.id}`)}
+                        onClick={() => navigate(`/chat/${agent.id}`)}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.transform = 'translateY(-4px)';
                             e.currentTarget.style.boxShadow = '0 10px 20px -5px rgba(0,0,0,0.05)';
@@ -56,8 +56,8 @@ const Dashboard = () => {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
                                 <div style={{ position: 'relative' }}>
                                     <img
-                                        src={intern.avatar}
-                                        alt={intern.name}
+                                        src={agent.avatar}
+                                        alt={agent.name}
                                         style={{
                                             width: '64px', height: '64px',
                                             borderRadius: '16px',
@@ -80,14 +80,14 @@ const Dashboard = () => {
                                 </button>
                             </div>
 
-                            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '4px' }}>{intern.name}</h3>
-                            <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--primary-600)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>{intern.role}</p>
-                            <p style={{ fontSize: '14px', color: 'var(--gray-500)', lineHeight: '1.5' }}>{intern.desc}</p>
+                            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '4px' }}>{agent.name}</h3>
+                            <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--primary-600)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>{agent.role}</p>
+                            <p style={{ fontSize: '14px', color: 'var(--gray-500)', lineHeight: '1.5' }}>{agent.desc}</p>
                         </div>
 
                         <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--gray-100)' }}>
                             <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'flex-start', paddingLeft: 0, color: 'var(--primary-600)' }}>
-                                <MessageSquare size={16} /> Chat with {intern.name}
+                                <MessageSquare size={16} /> Chat with {agent.name}
                             </button>
                         </div>
                     </div>
