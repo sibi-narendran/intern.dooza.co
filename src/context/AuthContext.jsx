@@ -31,6 +31,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true)
 
   // Fetch full profile data from public.users and related tables
+  // This is NON-BLOCKING - auth will complete even if this fails
   const fetchProfileData = async (authUser) => {
     if (!authUser) {
       setProfile(null)
@@ -40,36 +41,71 @@ export const AuthProvider = ({ children }) => {
       return
     }
 
-    try {
-      // Fetch user profile from public.users
-      const { data: profileData, error: profileError } = await getUserProfile(authUser.id)
-      if (profileError) {
-        console.error('Error fetching profile:', profileError)
-      } else {
-        setProfile(profileData)
-      }
+    console.log('[Auth] Fetching profile data for:', authUser.id)
 
-      // Fetch user's organizations
-      const { data: orgsData, error: orgsError } = await getUserOrganizations(authUser.id)
-      if (orgsError) {
-        console.error('Error fetching organizations:', orgsError)
-      } else {
-        setOrganizations(orgsData || [])
-        // Set first org as current if none selected
-        if (orgsData?.length > 0 && !currentOrg) {
-          setCurrentOrg(orgsData[0])
+    // Fetch profile data in parallel, with individual error handling
+    // Don't let one failure block the others
+    const profilePromise = getUserProfile(authUser.id)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[Profile] Error:', error.message)
+          return null
         }
-      }
+        console.log('[Profile] Loaded:', data?.email)
+        return data
+      })
+      .catch(err => {
+        console.error('[Profile] Exception:', err.message)
+        return null
+      })
 
-      // Check agent product access
-      const { hasAccess, role, orgId, error: accessError } = await checkProductAccess(authUser.id, 'agent')
-      if (accessError) {
-        console.error('Error checking product access:', accessError)
-      } else {
-        setProductAccess({ hasAccess, role, orgId })
+    const orgsPromise = getUserOrganizations(authUser.id)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[Orgs] Error:', error.message)
+          return []
+        }
+        console.log('[Orgs] Loaded:', data?.length || 0, 'organizations')
+        return data || []
+      })
+      .catch(err => {
+        console.error('[Orgs] Exception:', err.message)
+        return []
+      })
+
+    const accessPromise = checkProductAccess(authUser.id, 'agent')
+      .then(({ hasAccess, role, orgId, error }) => {
+        if (error) {
+          console.error('[Access] Error:', error.message)
+          return { hasAccess: false, role: null, orgId: null }
+        }
+        console.log('[Access] Agent access:', hasAccess ? `Yes (${role})` : 'No')
+        return { hasAccess, role, orgId }
+      })
+      .catch(err => {
+        console.error('[Access] Exception:', err.message)
+        return { hasAccess: false, role: null, orgId: null }
+      })
+
+    // Wait for all with a timeout
+    try {
+      const results = await Promise.race([
+        Promise.all([profilePromise, orgsPromise, accessPromise]),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Profile fetch timeout')), 8000)
+        )
+      ])
+
+      const [profileData, orgsData, accessData] = results
+      setProfile(profileData)
+      setOrganizations(orgsData)
+      if (orgsData?.length > 0) {
+        setCurrentOrg(orgsData[0])
       }
+      setProductAccess(accessData)
     } catch (err) {
-      console.error('Failed to fetch profile data:', err)
+      console.error('[Auth] Profile fetch failed or timed out:', err.message)
+      // Still continue - user can use the app with just auth data
     }
   }
 
@@ -125,10 +161,12 @@ export const AuthProvider = ({ children }) => {
         
         if (isMounted) {
           setUser(authUser)
+          setLoading(false) // Set loading false IMMEDIATELY
+          
+          // Fetch profile in background (non-blocking)
           if (authUser) {
-            await fetchProfileData(authUser)
+            fetchProfileData(authUser)
           }
-          setLoading(false)
         }
       } catch (err) {
         console.error('[Auth] Exception during session check:', err.message, err)
@@ -143,16 +181,18 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         console.log('[Auth] State change:', event)
         if (!isMounted) return
         
         const authUser = session?.user ?? null
         setUser(authUser)
+        setLoading(false) // Set loading false IMMEDIATELY - don't wait for profile
+        
+        // Fetch profile in background (non-blocking)
         if (authUser) {
-          await fetchProfileData(authUser)
+          fetchProfileData(authUser)
         }
-        setLoading(false)
       }
     )
 
