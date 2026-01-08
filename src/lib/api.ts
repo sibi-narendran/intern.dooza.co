@@ -1,11 +1,43 @@
 import { supabase } from './supabase'
 
+// Types
+export interface UserProfile {
+  id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  intended_product: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Organization {
+  id: string
+  name: string
+  slug: string | null
+  owner_id: string
+  created_at: string
+  updated_at: string
+  role?: string
+  products?: { product: string; role: string }[]
+}
+
+export interface ProductAccess {
+  hasAccess: boolean
+  role: string | null
+  orgId: string | null
+}
+
+interface ApiResponse<T> {
+  data: T | null
+  error: Error | null
+}
+
 /**
  * Fetch user profile from public.users table
- * @param {string} userId - The user's UUID
- * @returns {Promise<{data: Object|null, error: Error|null}>}
  */
-export async function getUserProfile(userId) {
+export async function getUserProfile(userId: string): Promise<ApiResponse<UserProfile>> {
   const { data, error } = await supabase
     .from('users')
     .select('*')
@@ -17,11 +49,9 @@ export async function getUserProfile(userId) {
 
 /**
  * Fetch user's organizations with their role
- * @param {string} userId - The user's UUID
- * @returns {Promise<{data: Array|null, error: Error|null}>}
  */
-export async function getUserOrganizations(userId) {
-  // Get organizations where user is owner OR has product access
+export async function getUserOrganizations(userId: string): Promise<ApiResponse<Organization[]>> {
+  // Get organizations where user is owner
   const { data: ownedOrgs, error: ownedError } = await supabase
     .from('organizations')
     .select('*')
@@ -52,17 +82,17 @@ export async function getUserOrganizations(userId) {
   }
 
   // Merge and deduplicate organizations
-  const orgMap = new Map()
+  const orgMap = new Map<string, Organization>()
   
   ownedOrgs?.forEach(org => {
     orgMap.set(org.id, { ...org, role: 'owner', products: [] })
   })
 
-  accessOrgs?.forEach(access => {
+  accessOrgs?.forEach((access: { org_id: string; product: string; role: string; organizations: Organization | null }) => {
     if (access.organizations) {
       const existing = orgMap.get(access.org_id)
       if (existing) {
-        existing.products.push({ product: access.product, role: access.role })
+        existing.products?.push({ product: access.product, role: access.role })
       } else {
         orgMap.set(access.org_id, {
           ...access.organizations,
@@ -78,11 +108,11 @@ export async function getUserOrganizations(userId) {
 
 /**
  * Check if user has access to a specific product
- * @param {string} userId - The user's UUID
- * @param {string} product - Product name ('agent', 'desk', 'table', etc.)
- * @returns {Promise<{hasAccess: boolean, role: string|null, orgId: string|null, error: Error|null}>}
  */
-export async function checkProductAccess(userId, product = 'agent') {
+export async function checkProductAccess(
+  userId: string, 
+  product: string = 'agent'
+): Promise<ProductAccess & { error: Error | null }> {
   const { data, error } = await supabase
     .from('product_access')
     .select('*')
@@ -91,7 +121,7 @@ export async function checkProductAccess(userId, product = 'agent') {
     .limit(1)
     .single()
 
-  if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+  if (error && error.code !== 'PGRST116') {
     return { hasAccess: false, role: null, orgId: null, error }
   }
 
@@ -105,11 +135,11 @@ export async function checkProductAccess(userId, product = 'agent') {
 
 /**
  * Update user profile
- * @param {string} userId - The user's UUID
- * @param {Object} updates - Fields to update
- * @returns {Promise<{data: Object|null, error: Error|null}>}
  */
-export async function updateUserProfile(userId, updates) {
+export async function updateUserProfile(
+  userId: string, 
+  updates: Partial<UserProfile>
+): Promise<ApiResponse<UserProfile>> {
   const { data, error } = await supabase
     .from('users')
     .update({
