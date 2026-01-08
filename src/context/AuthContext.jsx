@@ -95,10 +95,19 @@ export const AuthProvider = ({ children }) => {
     const getSession = async () => {
       try {
         console.log('[Auth] Checking session...')
-        const { data: { session }, error } = await supabase.auth.getSession()
+        console.log('[Auth] Cookies available:', document.cookie ? 'Yes' : 'No')
+        
+        // Log all sb-* cookies (without values for security)
+        const sbCookies = document.cookie
+          .split(';')
+          .filter(c => c.trim().startsWith('sb-'))
+          .map(c => c.trim().split('=')[0])
+        console.log('[Auth] Supabase cookies found:', sbCookies.length > 0 ? sbCookies : 'None')
+        
+        const { data, error } = await supabase.auth.getSession()
         
         if (error) {
-          console.error('[Auth] Error getting session:', error)
+          console.error('[Auth] Error getting session:', error.message, error)
           if (isMounted) {
             setUser(null)
             setLoading(false)
@@ -106,8 +115,13 @@ export const AuthProvider = ({ children }) => {
           return
         }
         
+        const session = data?.session
         const authUser = session?.user ?? null
-        console.log('[Auth] Session found:', authUser ? `User: ${authUser.email}` : 'No user')
+        console.log('[Auth] Session result:', {
+          hasSession: !!session,
+          hasUser: !!authUser,
+          email: authUser?.email || 'N/A'
+        })
         
         if (isMounted) {
           setUser(authUser)
@@ -117,7 +131,7 @@ export const AuthProvider = ({ children }) => {
           setLoading(false)
         }
       } catch (err) {
-        console.error('[Auth] Failed to get session:', err)
+        console.error('[Auth] Exception during session check:', err.message, err)
         if (isMounted) {
           setUser(null)
           setLoading(false)
