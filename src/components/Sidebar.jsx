@@ -1,7 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Plus, Settings } from 'lucide-react';
+import { LayoutGrid, Plus } from 'lucide-react';
 import { agents } from '../data/agents';
 import logo from '../assets/logo.png';
+import UserMenu from './UserMenu';
 
 const Sidebar = () => {
     const location = useLocation();
@@ -70,15 +71,9 @@ const Sidebar = () => {
                 </div>
             </nav>
 
-            {/* Footer */}
+            {/* Footer - User Menu */}
             <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                <button style={{
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                    padding: '8px 12px', width: '100%', border: 'none', background: 'transparent',
-                    color: 'var(--gray-600)', cursor: 'pointer', fontSize: '14px', fontWeight: '500'
-                }} className="hover:bg-gray-100 rounded-md">
-                    <Settings size={18} /> Settings
-                </button>
+                <UserMenu />
             </div>
         </aside>
     );
