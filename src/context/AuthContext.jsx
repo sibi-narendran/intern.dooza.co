@@ -117,13 +117,14 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     let isMounted = true
+    let authCompleted = false  // Track if auth has completed
     
-    // Timeout to prevent infinite loading - redirect after 10 seconds
+    // Timeout to prevent infinite loading - only if auth hasn't completed
     const timeout = setTimeout(() => {
-      if (isMounted && loading) {
+      if (isMounted && !authCompleted) {
         console.error('Auth check timed out after 10 seconds')
         setLoading(false)
-        setUser(null)
+        // Don't set user to null - just stop loading
       }
     }, 10000)
 
@@ -160,8 +161,9 @@ export const AuthProvider = ({ children }) => {
         })
         
         if (isMounted) {
+          authCompleted = true  // Mark auth as completed
           setUser(authUser)
-          setLoading(false) // Set loading false IMMEDIATELY
+          setLoading(false)
           
           // Fetch profile in background (non-blocking)
           if (authUser) {
@@ -171,6 +173,7 @@ export const AuthProvider = ({ children }) => {
       } catch (err) {
         console.error('[Auth] Exception during session check:', err.message, err)
         if (isMounted) {
+          authCompleted = true  // Mark auth as completed (even on error)
           setUser(null)
           setLoading(false)
         }
@@ -185,9 +188,10 @@ export const AuthProvider = ({ children }) => {
         console.log('[Auth] State change:', event)
         if (!isMounted) return
         
+        authCompleted = true  // Mark auth as completed
         const authUser = session?.user ?? null
         setUser(authUser)
-        setLoading(false) // Set loading false IMMEDIATELY - don't wait for profile
+        setLoading(false)
         
         // Fetch profile in background (non-blocking)
         if (authUser) {
