@@ -1,20 +1,39 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { MessageSquare, MoreHorizontal } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { MoreHorizontal } from 'lucide-react';
 import { agents } from '../data/agents';
+import { useAgentModal } from '../context/AgentModalContext';
+import { useAuth } from '../context/AuthContext';
+
+const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+};
 
 const Dashboard = () => {
-    const navigate = useNavigate();
+    const { openAgentModal } = useAgentModal();
+    const { profile, user } = useAuth();
+
+    const greeting = useMemo(() => getGreeting(), []);
+    
+    const displayName = useMemo(() => {
+        if (profile?.first_name) return profile.first_name;
+        if (user?.user_metadata?.first_name) return user.user_metadata.first_name;
+        return 'there';
+    }, [profile, user]);
 
     useEffect(() => {
         document.title = 'Dashboard | Dooza agent';
     }, []);
 
     return (
-        <div style={{ flex: 1, padding: '32px', overflowY: 'auto', background: 'var(--gray-50)' }}>
+        <div className="page-scrollable" style={{ padding: '32px', background: 'var(--gray-50)' }}>
             <header style={{ marginBottom: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                    <h1 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '8px' }}>Good afternoon, User</h1>
+                    <h1 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '8px' }}>
+                        {greeting}, {displayName}
+                    </h1>
                     <p style={{ color: 'var(--gray-500)' }}>Your AI staff is ready to work.</p>
                 </div>
                 <button className="btn btn-primary">
@@ -42,7 +61,7 @@ const Dashboard = () => {
                         justifyContent: 'space-between',
                         height: '100%'
                     }}
-                        onClick={() => navigate(`/chat/${agent.id}`)}
+                        onClick={() => openAgentModal(agent)}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.transform = 'translateY(-4px)';
                             e.currentTarget.style.boxShadow = '0 10px 20px -5px rgba(0,0,0,0.05)';
@@ -72,10 +91,15 @@ const Dashboard = () => {
                                         <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#22c55e', border: '2px solid white' }}></div>
                                     </div>
                                 </div>
-                                <button style={{
-                                    background: 'transparent', border: 'none', padding: '4px',
-                                    color: 'var(--gray-400)', cursor: 'pointer'
-                                }}>
+                                <button 
+                                    type="button"
+                                    style={{
+                                        background: 'transparent', border: 'none', padding: '4px',
+                                        color: 'var(--gray-400)', cursor: 'pointer'
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    aria-label="More options"
+                                >
                                     <MoreHorizontal size={20} />
                                 </button>
                             </div>
@@ -86,9 +110,16 @@ const Dashboard = () => {
                         </div>
 
                         <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--gray-100)' }}>
-                            <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'flex-start', paddingLeft: 0, color: 'var(--primary-600)' }}>
-                                <MessageSquare size={16} /> Chat with {agent.name}
-                            </button>
+                            <span style={{ 
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontSize: '13px', 
+                                color: 'var(--primary-600)',
+                                fontWeight: '500'
+                            }}>
+                                Click to see what {agent.name} can do →
+                            </span>
                         </div>
                     </div>
                 ))}

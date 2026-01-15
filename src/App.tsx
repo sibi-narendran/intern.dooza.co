@@ -1,12 +1,11 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { AgentModalProvider } from './context/AgentModalContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar from './components/Sidebar'
 import Navbar from './components/Navbar'
-import AppLayout from './components/AppLayout'
 import Dashboard from './pages/Dashboard'
-import Chat from './pages/Chat'
 
 function App() {
   return (
@@ -14,18 +13,20 @@ function App() {
       <AuthProvider>
         <Router>
           <ProtectedRoute>
-            <AppLayout>
-              <Sidebar />
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <Navbar />
-                <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-                  <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/chat/:id" element={<Chat />} />
-                  </Routes>
-                </main>
+            <AgentModalProvider>
+              <div className="app-shell">
+                <Sidebar />
+                <div className="app-shell__main">
+                  <Navbar />
+                  <main className="app-shell__content">
+                    <Routes>
+                      <Route path="/" element={<Dashboard />} />
+                      <Route path="*" element={<Dashboard />} />
+                    </Routes>
+                  </main>
+                </div>
               </div>
-            </AppLayout>
+            </AgentModalProvider>
           </ProtectedRoute>
         </Router>
       </AuthProvider>

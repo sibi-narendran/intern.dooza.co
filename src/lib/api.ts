@@ -88,14 +88,15 @@ export async function getUserOrganizations(userId: string): Promise<ApiResponse<
     orgMap.set(org.id, { ...org, role: 'owner', products: [] })
   })
 
-  accessOrgs?.forEach((access: { org_id: string; product: string; role: string; organizations: Organization | null }) => {
-    if (access.organizations) {
+  accessOrgs?.forEach((access) => {
+    const org = access.organizations as unknown as Organization | null
+    if (org) {
       const existing = orgMap.get(access.org_id)
       if (existing) {
         existing.products?.push({ product: access.product, role: access.role })
       } else {
         orgMap.set(access.org_id, {
-          ...access.organizations,
+          ...org,
           role: access.role,
           products: [{ product: access.product, role: access.role }]
         })

@@ -53,6 +53,46 @@ body {
     height: 100%;
 }
 
+/* ======================
+   App Shell Layout
+   ====================== */
+
+.app-shell {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+}
+
+.app-shell__sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-color);
+}
+
+.app-shell__main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0; /* Prevent flex item from overflowing */
+}
+
+.app-shell__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0; /* Critical: allows children to scroll */
+}
+
+/* Page containers that need scrolling */
+.page-scrollable {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
 .btn {
     display: inline-flex;
     align-items: center;
@@ -569,4 +609,66 @@ body {
 
 .error-boundary__btn--secondary:hover {
     background: var(--gray-50);
+}
+
+/* ======================
+   Offline Banner
+   ====================== */
+
+.offline-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    width: 100vw;
+    background: var(--bg-app);
+}
+
+.offline-banner__content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 40px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    max-width: 400px;
+    text-align: center;
+}
+
+.offline-banner__content svg {
+    width: 48px;
+    height: 48px;
+    color: var(--gray-400);
+}
+
+.offline-banner__title {
+    margin: 0 0 8px 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--gray-900);
+}
+
+.offline-banner__text {
+    margin: 0;
+    color: var(--gray-500);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.offline-banner__btn {
+    padding: 12px 32px;
+    background: var(--primary-600);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.offline-banner__btn:hover {
+    background: var(--primary-700);
 }
