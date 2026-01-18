@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
-import { BookOpen, Plus, Building2, User, FileText, Folder, AlertCircle, Search } from 'lucide-react'
+import { Brain, Plus, Building2, User, FileText, Folder, Search } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { 
   getOrgKnowledgeBases, 
@@ -16,44 +15,36 @@ const KB_TYPE_CONFIG = {
   custom: { label: 'Custom', color: '#7c3aed', bg: '#f5f3ff' },
 }
 
+type TabType = 'organization' | 'personal'
+
 export default function KnowledgeBasePage() {
-  const { scope } = useParams<{ scope: 'organization' | 'personal' }>()
   const { user, currentOrg } = useAuth()
+  const [activeTab, setActiveTab] = useState<TabType>('organization')
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-
-  const isOrgScope = scope === 'organization'
-  const scopeTitle = isOrgScope ? currentOrg?.name || 'Organization' : 'Personal'
-  const ScopeIcon = isOrgScope ? Building2 : User
 
   useEffect(() => {
     async function loadKnowledgeBases() {
       if (!user) return
       
       setLoading(true)
-      setError(null)
 
       try {
-        const result = isOrgScope && currentOrg
+        const result = activeTab === 'organization' && currentOrg
           ? await getOrgKnowledgeBases(currentOrg.id)
           : await getUserKnowledgeBases(user.id)
 
-        if (result.error) {
-          setError(result.error.message)
-        } else {
-          setKnowledgeBases(result.data || [])
-        }
-      } catch (err) {
-        setError('Failed to load knowledge bases')
+        setKnowledgeBases(result.data || [])
+      } catch {
+        setKnowledgeBases([])
       } finally {
         setLoading(false)
       }
     }
 
     loadKnowledgeBases()
-  }, [user, currentOrg, isOrgScope])
+  }, [user, currentOrg, activeTab])
 
   const filteredKBs = knowledgeBases.filter(kb =>
     kb.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -63,7 +54,7 @@ export default function KnowledgeBasePage() {
   return (
     <div className="page-scrollable" style={{ padding: '32px 40px' }}>
       {/* Header */}
-      <div style={{ marginBottom: '32px' }}>
+      <div style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
           <div style={{
             width: '40px',
@@ -74,23 +65,69 @@ export default function KnowledgeBasePage() {
             alignItems: 'center',
             justifyContent: 'center'
           }}>
-            <BookOpen size={20} color="white" />
+            <Brain size={20} color="white" />
           </div>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: '700', color: 'var(--gray-900)', margin: 0 }}>
-              Knowledge Base
-            </h1>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-              <ScopeIcon size={14} style={{ color: 'var(--gray-400)' }} />
-              <span style={{ fontSize: '14px', color: 'var(--gray-500)' }}>{scopeTitle}</span>
-            </div>
-          </div>
+          <h1 style={{ fontSize: '24px', fontWeight: '700', color: 'var(--gray-900)', margin: 0 }}>
+            Knowledge Base
+          </h1>
         </div>
-        <p style={{ fontSize: '15px', color: 'var(--gray-600)', marginTop: '12px', maxWidth: '600px' }}>
-          {isOrgScope 
-            ? 'Shared knowledge for your organization. Agents can access this information to provide accurate, context-aware responses.'
-            : 'Your personal knowledge base. Store information that only your personal agents can access.'}
+        <p style={{ fontSize: '15px', color: 'var(--gray-600)', marginTop: '8px', maxWidth: '600px' }}>
+          Store information that your AI agents can access for accurate, context-aware responses.
         </p>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ 
+        display: 'flex', 
+        gap: '4px', 
+        marginBottom: '24px',
+        background: 'var(--gray-100)',
+        padding: '4px',
+        borderRadius: '10px',
+        width: 'fit-content'
+      }}>
+        <button
+          onClick={() => setActiveTab('organization')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeTab === 'organization' ? 'white' : 'transparent',
+            color: activeTab === 'organization' ? 'var(--gray-900)' : 'var(--gray-600)',
+            fontWeight: activeTab === 'organization' ? '600' : '500',
+            fontSize: '14px',
+            cursor: 'pointer',
+            boxShadow: activeTab === 'organization' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            transition: 'all 0.15s'
+          }}
+        >
+          <Building2 size={16} />
+          {currentOrg?.name || 'Organization'}
+        </button>
+        <button
+          onClick={() => setActiveTab('personal')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeTab === 'personal' ? 'white' : 'transparent',
+            color: activeTab === 'personal' ? 'var(--gray-900)' : 'var(--gray-600)',
+            fontWeight: activeTab === 'personal' ? '600' : '500',
+            fontSize: '14px',
+            cursor: 'pointer',
+            boxShadow: activeTab === 'personal' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            transition: 'all 0.15s'
+          }}
+        >
+          <User size={16} />
+          Personal
+        </button>
       </div>
 
       {/* Search and Actions */}
@@ -100,11 +137,7 @@ export default function KnowledgeBasePage() {
         gap: '16px', 
         marginBottom: '24px' 
       }}>
-        <div style={{
-          flex: 1,
-          maxWidth: '400px',
-          position: 'relative'
-        }}>
+        <div style={{ flex: 1, maxWidth: '400px', position: 'relative' }}>
           <Search 
             size={18} 
             style={{ 
@@ -126,11 +159,8 @@ export default function KnowledgeBasePage() {
               border: '1px solid var(--gray-200)',
               borderRadius: '8px',
               fontSize: '14px',
-              outline: 'none',
-              transition: 'border-color 0.15s'
+              outline: 'none'
             }}
-            onFocus={(e) => e.target.style.borderColor = 'var(--primary-400)'}
-            onBlur={(e) => e.target.style.borderColor = 'var(--gray-200)'}
           />
         </div>
         <button style={{
@@ -144,16 +174,19 @@ export default function KnowledgeBasePage() {
           borderRadius: '8px',
           fontSize: '14px',
           fontWeight: '600',
-          cursor: 'pointer',
-          transition: 'background 0.15s'
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--primary-700)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--primary-600)'}
-        >
+          cursor: 'pointer'
+        }}>
           <Plus size={18} />
           New Knowledge Base
         </button>
       </div>
+
+      {/* Loading */}
+      {loading && (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '64px' }}>
+          <div className="auth-loading__spinner" />
+        </div>
+      )}
 
       {/* Knowledge Bases Grid */}
       {!loading && filteredKBs.length > 0 && (
@@ -170,14 +203,6 @@ export default function KnowledgeBasePage() {
                   border: '1px solid var(--gray-200)',
                   cursor: 'pointer',
                   transition: 'all 0.15s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--primary-300)'
-                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--gray-200)'
-                  e.currentTarget.style.boxShadow = 'none'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
@@ -271,7 +296,7 @@ export default function KnowledgeBasePage() {
             margin: '0 auto 20px',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)'
           }}>
-            <BookOpen size={28} style={{ color: 'var(--gray-400)' }} />
+            <Brain size={28} style={{ color: 'var(--gray-400)' }} />
           </div>
           <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--gray-800)', marginBottom: '8px' }}>
             {searchQuery ? 'No results found' : 'No knowledge bases yet'}
@@ -299,35 +324,6 @@ export default function KnowledgeBasePage() {
               Create Knowledge Base
             </button>
           )}
-        </div>
-      )}
-
-      {/* Error state */}
-      {error && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '16px',
-          background: '#fef2f2',
-          borderRadius: '8px',
-          color: '#dc2626',
-          marginTop: '24px'
-        }}>
-          <AlertCircle size={20} />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Loading state */}
-      {loading && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '64px'
-        }}>
-          <div className="auth-loading__spinner" />
         </div>
       )}
     </div>

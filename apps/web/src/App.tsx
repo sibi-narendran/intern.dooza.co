@@ -8,6 +8,7 @@ import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
 import IntegrationsPage from './pages/IntegrationsPage'
 import KnowledgeBasePage from './pages/KnowledgeBasePage'
+import WorkforceGalleryPage from './pages/WorkforceGalleryPage'
 
 function App() {
   return (
@@ -23,14 +24,9 @@ function App() {
                   <main className="app-shell__content">
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
-                      
-                      {/* Integrations */}
-                      <Route path="/integrations/:scope" element={<IntegrationsPage />} />
-                      
-                      {/* Knowledge Base */}
-                      <Route path="/knowledge/:scope" element={<KnowledgeBasePage />} />
-                      
-                      {/* Fallback */}
+                      <Route path="/integrations" element={<IntegrationsPage />} />
+                      <Route path="/knowledge" element={<KnowledgeBasePage />} />
+                      <Route path="/gallery" element={<WorkforceGalleryPage />} />
                       <Route path="*" element={<Dashboard />} />
                     </Routes>
                   </main>
