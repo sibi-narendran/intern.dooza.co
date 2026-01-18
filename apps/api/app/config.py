@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str
     database_url: str
     
+    # Composio (for integrations)
+    composio_api_key: str = ""
+    
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""

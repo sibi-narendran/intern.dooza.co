@@ -10,6 +10,37 @@ _checkpointer = None
 _pool = None
 _init_attempted = False
 
+# Supabase client for direct queries
+_supabase_client = None
+
+
+def get_supabase_client():
+    """
+    Get or create Supabase client for direct database queries.
+    Uses service role key for backend operations.
+    """
+    global _supabase_client
+    
+    if _supabase_client is not None:
+        return _supabase_client
+    
+    settings = get_settings()
+    
+    try:
+        from supabase import create_client
+        _supabase_client = create_client(
+            settings.supabase_url,
+            settings.supabase_service_key
+        )
+        logger.info("Supabase client initialized")
+        return _supabase_client
+    except ImportError:
+        logger.error("supabase-py not installed. Run: pip install supabase")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to init Supabase client: {e}")
+        return None
+
 
 async def init_checkpointer() -> None:
     """

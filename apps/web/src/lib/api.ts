@@ -45,6 +45,31 @@ export interface Integration {
   updated_at: string
 }
 
+// Composio Integration Types
+export interface ComposioApp {
+  key: string
+  name: string
+  description: string
+  logo?: string
+  categories: string[]
+}
+
+export interface ComposioConnection {
+  id: string
+  app_key: string
+  app_name: string
+  status: string
+  created_at: string
+  account_display?: string
+}
+
+export interface ConnectResponse {
+  redirect_url: string
+  connection_id: string
+}
+
+export type ConnectionScope = 'organization' | 'personal'
+
 export interface KnowledgeBase {
   id: string
   name: string
@@ -270,6 +295,197 @@ export async function deleteIntegration(integrationId: string): Promise<ApiRespo
     .eq('id', integrationId)
 
   return { data: null, error }
+}
+
+// ============================================================================
+// Composio Integrations API (via FastAPI backend)
+// ============================================================================
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) {
+    throw new Error('Not authenticated')
+  }
+  return {
+    'Authorization': `Bearer ${session.access_token}`,
+    'Content-Type': 'application/json'
+  }
+}
+
+// Cache config
+const APPS_CACHE_KEY = 'dooza_integrations_apps'
+const APPS_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
+
+interface CachedData<T> {
+  data: T
+  timestamp: number
+}
+
+function getCachedApps(): ComposioApp[] | null {
+  try {
+    const cached = localStorage.getItem(APPS_CACHE_KEY)
+    if (!cached) return null
+    
+    const { data, timestamp }: CachedData<ComposioApp[]> = JSON.parse(cached)
+    if (Date.now() - timestamp > APPS_CACHE_TTL) {
+      localStorage.removeItem(APPS_CACHE_KEY)
+      return null
+    }
+    return data
+  } catch {
+    return null
+  }
+}
+
+function setCachedApps(apps: ComposioApp[]): void {
+  try {
+    const cached: CachedData<ComposioApp[]> = { data: apps, timestamp: Date.now() }
+    localStorage.setItem(APPS_CACHE_KEY, JSON.stringify(cached))
+  } catch {
+    // localStorage might be full or disabled
+  }
+}
+
+/**
+ * Get list of available integration apps from Composio
+ * Uses localStorage cache (24h TTL) for fast loading
+ */
+export async function getAvailableApps(): Promise<ComposioApp[]> {
+  // Return cached data immediately if available
+  const cached = getCachedApps()
+  if (cached && cached.length > 0) {
+    // Refresh cache in background (stale-while-revalidate pattern)
+    refreshAppsCache()
+    return cached
+  }
+  
+  // No cache, fetch fresh
+  return fetchAndCacheApps()
+}
+
+async function fetchAndCacheApps(): Promise<ComposioApp[]> {
+  try {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1/integrations/apps`, { headers })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch apps: ${response.statusText}`)
+    }
+    
+    const apps = await response.json()
+    setCachedApps(apps)
+    return apps
+  } catch (error) {
+    console.error('Failed to fetch available apps:', error)
+    // Return cached even if expired, as fallback
+    const cached = getCachedApps()
+    return cached || []
+  }
+}
+
+// Background refresh without blocking UI
+function refreshAppsCache(): void {
+  fetchAndCacheApps().catch(() => {})
+}
+
+/**
+ * Get user's or org's connected accounts
+ */
+export async function getConnections(
+  scope: ConnectionScope,
+  orgId?: string
+): Promise<ComposioConnection[]> {
+  try {
+    const headers = await getAuthHeaders()
+    const params = new URLSearchParams({ scope })
+    if (orgId) params.set('org_id', orgId)
+    
+    const response = await fetch(
+      `${API_BASE}/v1/integrations/connections?${params}`,
+      { headers }
+    )
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch connections: ${response.statusText}`)
+    }
+    
+    return response.json()
+  } catch (error) {
+    console.error('Failed to fetch connections:', error)
+    return []
+  }
+}
+
+/**
+ * Initiate OAuth connection flow for an app
+ * Returns URL to redirect user to for OAuth consent
+ */
+export async function initiateConnection(
+  appKey: string,
+  scope: ConnectionScope,
+  orgId?: string,
+  redirectUrl?: string
+): Promise<ConnectResponse> {
+  const headers = await getAuthHeaders()
+  
+  const response = await fetch(`${API_BASE}/v1/integrations/connect`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      app_key: appKey,
+      scope,
+      org_id: orgId,
+      redirect_url: redirectUrl || window.location.href
+    })
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }))
+    throw new Error(error.detail || 'Failed to initiate connection')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Disconnect (revoke) an integration
+ */
+export async function disconnectIntegration(connectionId: string): Promise<void> {
+  const headers = await getAuthHeaders()
+  
+  const response = await fetch(
+    `${API_BASE}/v1/integrations/connections/${connectionId}`,
+    { method: 'DELETE', headers }
+  )
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }))
+    throw new Error(error.detail || 'Failed to disconnect')
+  }
+}
+
+/**
+ * Check integration service status
+ */
+export async function getIntegrationStatus(): Promise<{
+  enabled: boolean
+  configured: boolean
+  message: string
+}> {
+  try {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1/integrations/status`, { headers })
+    
+    if (!response.ok) {
+      return { enabled: false, configured: false, message: 'Service unavailable' }
+    }
+    
+    return response.json()
+  } catch {
+    return { enabled: false, configured: false, message: 'Failed to connect to API' }
+  }
 }
 
 // ============================================================================

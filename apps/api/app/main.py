@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import health, chat
+from app.routers import health, chat, integrations, gallery
 from app.core.database import init_checkpointer, close_checkpointer
 
 # Configure logging
@@ -66,6 +66,8 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health.router, tags=["Health"])
     app.include_router(chat.router, prefix="/v1", tags=["Chat"])
+    app.include_router(integrations.router, prefix="/v1/integrations", tags=["Integrations"])
+    app.include_router(gallery.router, prefix="/v1", tags=["Gallery"])
     
     return app
 

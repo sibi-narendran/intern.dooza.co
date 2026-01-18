@@ -39,3 +39,4 @@ htmlcov/
 .cache/
 .deploy-keys
 .vercel
+golan.md
