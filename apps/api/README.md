@@ -1,6 +1,6 @@
 # Dooza AI API
 
-FastAPI backend for Dooza AI agents, powered by LangGraph.
+FastAPI backend for Dooza Workforce, powered by LangGraph.
 
 ## Setup
 

@@ -113,7 +113,7 @@ export const supabase: SupabaseClient = createBrowserClient(
       flowType: 'implicit',
       
       // Storage key - use a consistent key to avoid orphaned sessions
-      storageKey: 'dooza-agent-auth',
+      storageKey: 'dooza-workforce-auth',
     },
     cookieOptions: {
       ...(cookieDomain ? { domain: cookieDomain } : {}),
@@ -227,7 +227,7 @@ export const supabase: SupabaseClient = createBrowserClient(
  * Clear all auth-related storage
  */
 function clearAuthStorage(): void {
-  const storageKeys = ['dooza-agent-auth']
+  const storageKeys = ['dooza-workforce-auth']
   
   // Clear localStorage
   for (let i = localStorage.length - 1; i >= 0; i--) {
