@@ -24,7 +24,7 @@ const Dashboard = () => {
     }, [profile, user]);
 
     useEffect(() => {
-        document.title = 'Dashboard | Dooza agent';
+        document.title = 'Dashboard | Dooza Workforce';
     }, []);
 
     return (

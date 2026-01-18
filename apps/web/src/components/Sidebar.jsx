@@ -15,7 +15,7 @@ const Sidebar = () => {
             {/* Brand */}
             <div style={{ marginBottom: '32px', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <img src={logo} alt="Dooza Logo" style={{ width: '28px', height: '28px' }} />
-                <span style={{ fontWeight: '700', fontSize: '18px' }}>Dooza <span style={{ color: 'var(--primary-600)' }}>agent</span></span>
+                <span style={{ fontWeight: '700', fontSize: '18px' }}>Dooza <span style={{ color: 'var(--primary-600)' }}>Workforce</span></span>
             </div>
 
             {/* Main Nav */}
