@@ -177,13 +177,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
    * Handle unrecoverable auth failure - clear storage and redirect to login
    */
   const handleUnrecoverableAuthFailure = useCallback(async () => {
-    // Prevent multiple simultaneous handling
     if (isHandlingErrorRef.current) return
     isHandlingErrorRef.current = true
-
-    console.warn('[Auth] Unrecoverable auth failure - clearing session and redirecting to login')
     
-    // Clear all auth state
     setUser(null)
     setProfile(null)
     setOrganizations([])
@@ -191,13 +187,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setProductAccess(null)
     setLoading(false)
     
-    // Clear potentially corrupted storage (uses centralized function)
     await forceAuthReset()
-    
-    // Broadcast to other tabs
     broadcastAuthChange('SESSION_EXPIRED')
     
-    // Small delay to ensure state is cleared before redirect
     setTimeout(() => {
       redirectToLogin()
     }, 100)
@@ -374,10 +366,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         break
 
       default:
-        // Unknown events - log for debugging in development
-        if (import.meta.env.DEV) {
-          console.log('[Auth] Unhandled auth event:', event)
-        }
+        break
     }
   }, [resetProfileState, fetchProfileData]) // Removed 'user' - using ref instead
 
@@ -390,12 +379,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     let subscription: { unsubscribe: () => void } | null = null
     
     // Skip if already initializing, but use a timeout to ensure we don't get stuck
-    // This handles HMR cases where refs persist but effects re-run
     if (initializingRef.current) {
-      // Safety timeout: if we're stuck in loading after 5 seconds, force re-init
       const safetyTimeout = setTimeout(() => {
         if (mounted && loading) {
-          console.warn('[Auth] Safety timeout triggered - forcing re-initialization')
           initializingRef.current = false
           isHandlingErrorRef.current = false
           setLoading(false)
@@ -422,8 +408,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         const refreshToken = hashParams.get('refresh_token')
         
         if (accessToken && refreshToken) {
-          console.log('[Auth] Detected tokens in URL hash - setting session')
-          
           // Clean URL immediately (security: removes tokens from browser history)
           window.history.replaceState(null, '', window.location.pathname + window.location.search)
           
@@ -435,37 +419,30 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           
           if (!mounted) return
           
-          if (setSessionError) {
-            console.error('[Auth] Failed to set session from URL:', setSessionError.message)
-            // Fall through to normal getSession flow
-          } else if (data.session?.user) {
-            console.log('[Auth] Session established from URL tokens')
+          if (!setSessionError && data.session?.user) {
             authFailureCountRef.current = 0
             resetAuthRateLimiter()
             setUser(data.session.user)
             fetchProfileData(data.session.user)
             setLoading(false)
-            return // Success - exit early
+            return
           }
         }
         
         // =========================================================
         // STEP 2: Normal session check (existing session or no session)
         // =========================================================
-        // Get current session - this may trigger a token refresh
         const { data: { session }, error } = await supabase.auth.getSession()
         
         if (!mounted) return
 
         // If INITIAL_SESSION already handled this, skip to avoid double processing
         if (initialSessionHandledRef.current) {
-          // Just ensure loading is false (might already be)
           setLoading(false)
           return
         }
 
         if (error) {
-          // Check if this is a rate limit or auth error
           const errorMessage = error.message?.toLowerCase() || ''
           const isRateLimited = errorMessage.includes('rate') || errorMessage.includes('429')
           const isAuthError = errorMessage.includes('refresh_token') || 
@@ -481,7 +458,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             }
           }
           
-          // Non-fatal error - continue without session
           setLoading(false)
           return
         }
@@ -520,7 +496,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     // Listen for session corruption events from the Supabase client
     const handleSessionCorrupted = () => {
       if (!mounted || isHandlingErrorRef.current) return
-      console.warn('[Auth] Session corruption detected at fetch level')
       handleUnrecoverableAuthFailure()
     }
     window.addEventListener('supabase:session-corrupted', handleSessionCorrupted)
@@ -532,13 +507,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       try {
         const { type } = JSON.parse(event.newValue)
         if (type === 'SIGNED_OUT' || type === 'SESSION_EXPIRED') {
-          console.log('[Auth] Sign out detected from another tab')
-          // Don't redirect - just clear local state
-          // The other tab is handling the redirect
           setUser(null)
           resetProfileState()
           setLoading(false)
-          // Clear local storage too
           forceAuthReset()
         }
       } catch {

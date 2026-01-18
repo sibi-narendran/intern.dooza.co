@@ -44,14 +44,10 @@ const UserMenu = () => {
 
   const getInitials = (): string => {
     if (profile?.first_name) {
-      const first = profile.first_name[0] || ''
-      const last = profile.last_name?.[0] || ''
-      return (first + last).toUpperCase() || '?'
+      return profile.first_name[0].toUpperCase()
     }
     if (user?.user_metadata?.first_name) {
-      const first = (user.user_metadata.first_name as string)[0] || ''
-      const last = (user.user_metadata.last_name as string)?.[0] || ''
-      return (first + last).toUpperCase() || '?'
+      return (user.user_metadata.first_name as string)[0].toUpperCase()
     }
     if (user?.email) {
       return user.email[0].toUpperCase()
@@ -118,7 +114,7 @@ const UserMenu = () => {
               </div>
             </div>
 
-            {currentOrg?.name && (
+            {currentOrg && (
               <div className="profile-menu__org-section">
                 <Building2 size={14} />
                 <span>{currentOrg.name}</span>

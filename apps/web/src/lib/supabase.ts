@@ -1,5 +1,4 @@
-import { createBrowserClient } from '@supabase/ssr'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 // ============================================================================
 // Environment Variables
@@ -7,7 +6,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
-const cookieDomain = import.meta.env.VITE_COOKIE_DOMAIN as string | undefined
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
@@ -93,30 +91,23 @@ let isCleaningSession = false
  * - autoRefreshToken: true - Automatically refresh tokens before expiry
  * - persistSession: true - Store session in localStorage for persistence
  * - detectSessionInUrl: true - Handle OAuth redirects
- * - flowType: 'pkce' - Use PKCE flow for better security
- * 
- * The client uses @supabase/ssr for cross-domain cookie support
+ * - flowType: 'implicit' - Tokens come from accounts.dooza.ai in URL hash
  */
-export const supabase: SupabaseClient = createBrowserClient(
+export const supabase: SupabaseClient = createClient(
   supabaseUrl,
   supabaseAnonKey,
   {
     auth: {
-      // Session persistence
+      // Session persistence to localStorage
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
       
       // Use implicit flow - tokens come from accounts.dooza.ai in URL hash
-      // PKCE is used by accounts.dooza.ai during the actual OAuth flow
-      // This app receives the final tokens, not a code to exchange
       flowType: 'implicit',
       
-      // Storage key - use a consistent key to avoid orphaned sessions
+      // Storage key for localStorage
       storageKey: 'dooza-workforce-auth',
-    },
-    cookieOptions: {
-      ...(cookieDomain ? { domain: cookieDomain } : {}),
     },
     global: {
       // Custom fetch with rate limit protection for auth endpoints

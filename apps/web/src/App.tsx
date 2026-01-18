@@ -6,6 +6,8 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar from './components/Sidebar'
 import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
+import IntegrationsPage from './pages/IntegrationsPage'
+import KnowledgeBasePage from './pages/KnowledgeBasePage'
 
 function App() {
   return (
@@ -21,6 +23,14 @@ function App() {
                   <main className="app-shell__content">
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
+                      
+                      {/* Integrations */}
+                      <Route path="/integrations/:scope" element={<IntegrationsPage />} />
+                      
+                      {/* Knowledge Base */}
+                      <Route path="/knowledge/:scope" element={<KnowledgeBasePage />} />
+                      
+                      {/* Fallback */}
                       <Route path="*" element={<Dashboard />} />
                     </Routes>
                   </main>
