@@ -112,7 +112,7 @@ export async function getUserOrganizations(userId: string): Promise<ApiResponse<
  */
 export async function checkProductAccess(
   userId: string, 
-  product: string = 'agent'
+  product: string = 'workforce'
 ): Promise<ProductAccess & { error: Error | null }> {
   const { data, error } = await supabase
     .from('product_access')
