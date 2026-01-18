@@ -39,9 +39,20 @@ def create_app() -> FastAPI:
         description="AI Agent Backend powered by LangGraph",
         version="1.0.0",
         lifespan=lifespan,
-        docs_url="/docs" if settings.debug else None,
-        redoc_url="/redoc" if settings.debug else None,
+        docs_url="/docs",
+        redoc_url="/redoc",
     )
+    
+    @app.get("/")
+    async def root():
+        """Root endpoint - API information."""
+        return {
+            "service": "Dooza AI API",
+            "version": "1.0.0",
+            "status": "running",
+            "docs": "/docs",
+            "health": "/health"
+        }
     
     # CORS
     app.add_middleware(
