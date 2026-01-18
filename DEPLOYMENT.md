@@ -122,10 +122,61 @@ curl -X PUT -H "Authorization: Bearer $RENDER_API_KEY" \
 | **Project Ref** | `rndiktnoopmxcwdulspf` |
 | **Region** | us-west-1 |
 | **API URL** | https://rndiktnoopmxcwdulspf.supabase.co |
-| **DB Host (Pooler)** | aws-1-us-west-1.pooler.supabase.com |
-| **DB Port** | 5432 (Session) / 6543 (Transaction) |
 
-**Keys:** Stored in environment variables on Vercel/Render
+**Database Connection:**
+
+| Type | Host | Port | Use Case |
+|------|------|------|----------|
+| **Session Pooler** | `aws-1-us-west-1.pooler.supabase.com` | `5432` | Long-lived connections (recommended) |
+| **Transaction Pooler** | `aws-1-us-west-1.pooler.supabase.com` | `6543` | Serverless/short connections |
+| **Direct** | `db.rndiktnoopmxcwdulspf.supabase.co` | `5432` | Not recommended (IPv4 issues) |
+
+**Connection String Format:**
+```
+postgresql://postgres.rndiktnoopmxcwdulspf:[PASSWORD]@aws-1-us-west-1.pooler.supabase.com:5432/postgres
+```
+
+**Keys:** See `.deploy-keys` file for all Supabase credentials
+
+**API Usage:**
+```bash
+# Query via REST API
+curl "https://rndiktnoopmxcwdulspf.supabase.co/rest/v1/threads" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+
+# Query via SQL (using psql)
+psql "$DATABASE_URL" -c "SELECT * FROM threads LIMIT 5;"
+
+# Python connection test
+python3 -c "
+import asyncio
+import psycopg
+async def test():
+    async with await psycopg.AsyncConnection.connect('$DATABASE_URL') as conn:
+        async with conn.cursor() as cur:
+            await cur.execute('SELECT 1')
+            print(await cur.fetchone())
+asyncio.run(test())
+"
+```
+
+**Database Tables:**
+
+| Table | Purpose |
+|-------|---------|
+| `auth.users` | Supabase Auth users (managed by Supabase) |
+| `public.users` | User profiles |
+| `public.organizations` | Organizations |
+| `public.product_access` | Product access control |
+| `public.threads` | Chat conversation threads |
+| `public.checkpoints` | LangGraph state checkpoints |
+| `public.checkpoint_blobs` | LangGraph binary data |
+| `public.checkpoint_writes` | LangGraph write operations |
+
+**Row Level Security (RLS):**
+- All `public` tables have RLS enabled
+- Users can only access their own data via `auth.uid()`
 
 ---
 
