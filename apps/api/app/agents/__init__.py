@@ -1,30 +1,85 @@
 """
 Dooza AI Agents Module
 
-This module provides the agent system including:
-- DoozaAgent base class for building agents
-- AgentConfig for agent configuration
-- AgentEvent types for SSE streaming
-- Individual agent implementations (seomi, penn, etc.)
+This module provides the agent system using LangGraph's supervisor pattern.
+
+Agent Hierarchy:
+- Supervisor (user-facing): SEOmi - routes to specialists
+- Specialists (hidden): seo_tech, seo_content, seo_analytics
+
+Usage:
+    from app.agents import get_seomi_app
+    
+    app = get_seomi_app(checkpointer=checkpointer)
+    result = await app.ainvoke({"messages": [HumanMessage(content="...")]}, config)
 """
 
-from app.agents.base import DoozaAgent, get_llm, create_base_agent, get_agent_prompt
+# Supervisor - Main entry point
+from app.agents.seomi import (
+    create_seomi_supervisor,
+    get_seomi_app,
+    SEOMI_CONFIG,
+)
+
+# Specialists (for direct testing/use)
+from app.agents.seo_tech import create_seo_tech_agent
+from app.agents.seo_content import create_seo_content_agent
+from app.agents.seo_analytics import create_seo_analytics_agent
+
+# Factory utilities
+from app.agents.factory import (
+    get_agent,
+    get_supervisor_app,
+    get_legacy_agent,
+    is_supervisor_agent,
+    get_agent_config,
+    is_valid_agent,
+)
+
+# Events (for SSE streaming)
+from app.agents.events import (
+    AgentEvent,
+    EventType,
+    event_stream_headers,
+    SSE_DONE,
+)
+
+# Config
 from app.agents.config import AgentConfig
-from app.agents.events import AgentEvent, EventType, event_stream_headers, SSE_DONE
+
+# Base utilities
+from app.agents.base import get_llm, create_base_agent
+
 
 __all__ = [
-    # Core classes
-    "DoozaAgent",
-    "AgentConfig",
+    # Supervisor
+    "create_seomi_supervisor",
+    "get_seomi_app",
+    "SEOMI_CONFIG",
+    
+    # Specialists
+    "create_seo_tech_agent",
+    "create_seo_content_agent",
+    "create_seo_analytics_agent",
+    
+    # Factory
+    "get_agent",
+    "get_supervisor_app",
+    "get_legacy_agent",
+    "is_supervisor_agent",
+    "get_agent_config",
+    "is_valid_agent",
+    
+    # Events
     "AgentEvent",
     "EventType",
-    
-    # Utilities
-    "get_llm",
     "event_stream_headers",
     "SSE_DONE",
     
-    # Legacy (backwards compatibility)
+    # Config
+    "AgentConfig",
+    
+    # Base
+    "get_llm",
     "create_base_agent",
-    "get_agent_prompt",
 ]

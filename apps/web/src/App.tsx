@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { AgentModalProvider } from './context/AgentModalContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -32,7 +32,7 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <Router>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <ProtectedRoute>
             <Routes>
               {/* Chat page - full screen without sidebar/navbar */}
@@ -68,7 +68,7 @@ function App() {
               } />
             </Routes>
           </ProtectedRoute>
-        </Router>
+        </BrowserRouter>
       </AuthProvider>
     </ErrorBoundary>
   )

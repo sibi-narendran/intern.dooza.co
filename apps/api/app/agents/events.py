@@ -3,7 +3,12 @@ Agent Events
 
 Event types emitted during agent execution for SSE streaming.
 These events allow the frontend to show real-time feedback about
-what the agent is doing (thinking, using tools, delegating, etc.)
+what the agent is doing (thinking, using tools, etc.)
+
+Production-ready:
+- Only includes actively used event types
+- Safe JSON serialization
+- Standard SSE format
 """
 
 from __future__ import annotations
@@ -21,62 +26,48 @@ def _safe_serialize(obj: Any, depth: int = 0) -> Any:
     Safely convert an object to a JSON-serializable form.
     
     Handles common non-serializable types like methods, classes, etc.
-    
-    Args:
-        obj: Object to serialize
-        depth: Current recursion depth (to prevent infinite loops)
     """
-    # Prevent infinite recursion
     if depth > 10:
         return str(obj)[:200]
     
     if obj is None:
         return None
     
-    # Already serializable primitives
     if isinstance(obj, (str, int, float, bool)):
         return obj
     
-    # Bytes
     if isinstance(obj, bytes):
         return obj.decode('utf-8', errors='replace')
     
-    # Lists - recursively serialize elements
     if isinstance(obj, (list, tuple)):
         return [_safe_serialize(item, depth + 1) for item in obj]
     
-    # Sets
     if isinstance(obj, (set, frozenset)):
         return [_safe_serialize(item, depth + 1) for item in obj]
     
-    # Dicts - recursively serialize values
     if isinstance(obj, dict):
         return {str(k): _safe_serialize(v, depth + 1) for k, v in obj.items()}
     
-    # Check if it's a method or function first
     if callable(obj):
         return f"<callable:{type(obj).__name__}>"
     
-    # Check for common LangChain/Pydantic objects
-    if hasattr(obj, 'dict') and callable(getattr(obj, 'dict')):
-        try:
-            return _safe_serialize(obj.dict(), depth + 1)
-        except Exception:
-            pass
-    
+    # Pydantic objects
     if hasattr(obj, 'model_dump') and callable(getattr(obj, 'model_dump')):
         try:
             return _safe_serialize(obj.model_dump(), depth + 1)
         except Exception:
             pass
     
-    # Try to convert to string as fallback
+    if hasattr(obj, 'dict') and callable(getattr(obj, 'dict')):
+        try:
+            return _safe_serialize(obj.dict(), depth + 1)
+        except Exception:
+            pass
+    
     try:
-        # Try json dumps to see if it's serializable
         json.dumps(obj)
         return obj
     except (TypeError, ValueError):
-        # Convert to string representation
         return f"<{type(obj).__name__}>: {str(obj)[:200]}"
 
 
@@ -89,15 +80,7 @@ class EventType(str, Enum):
     # Tool execution
     TOOL_START = "tool_start"
     TOOL_END = "tool_end"
-    TOOL_DATA = "tool_data"  # Full structured tool results for frontend rendering
-    
-    # Agent delegation
-    DELEGATE = "delegate"
-    AGENT_SWITCH = "agent_switch"
-    
-    # Status updates
-    THINKING = "thinking"
-    STATUS = "status"
+    TOOL_DATA = "tool_data"
     
     # Completion
     END = "end"
@@ -105,31 +88,17 @@ class EventType(str, Enum):
     
     # Metadata
     THREAD_ID = "thread_id"
-    METADATA = "metadata"
 
 
 @dataclass
 class AgentEvent:
     """
-    Events emitted during agent execution.
+    Events emitted during agent execution for SSE streaming.
     
-    Used for SSE streaming to the frontend, allowing real-time
-    display of:
+    Used for:
     - Streaming text tokens
     - Tool usage indicators
-    - Agent delegation status
     - Errors and completion
-    
-    Attributes:
-        type: The event type (token, tool_start, etc.)
-        content: Text content for token events
-        tool_name: Name of tool for tool events
-        tool_args: Arguments passed to tool
-        tool_result: Result from tool execution
-        to_agent: Target agent for delegation
-        from_agent: Source agent for delegation
-        error: Error message for error events
-        metadata: Additional event-specific data
     """
     
     type: EventType
@@ -142,13 +111,7 @@ class AgentEvent:
     tool_args: Optional[Dict[str, Any]] = None
     tool_result: Any = None
     
-    # Delegation
-    to_agent: Optional[str] = None
-    from_agent: Optional[str] = None
-    task: Optional[str] = None
-    
     # Status/metadata
-    status: Optional[str] = None
     thread_id: Optional[str] = None
     
     # Error
@@ -158,34 +121,18 @@ class AgentEvent:
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary, excluding None values. Ensures JSON serializable."""
-        # Always convert type to string to ensure serializability
-        if isinstance(self.type, EventType):
-            type_str = self.type.value
-        elif hasattr(self.type, 'value'):
-            type_str = self.type.value
-        else:
-            type_str = str(self.type)
-        
+        """Convert to dictionary, excluding None values."""
+        type_str = self.type.value if isinstance(self.type, EventType) else str(self.type)
         result: Dict[str, Any] = {"type": type_str}
         
-        # Add non-None fields - use _safe_serialize for potentially complex objects
         if self.content is not None:
-            result["content"] = str(self.content) if not isinstance(self.content, str) else self.content
+            result["content"] = str(self.content)
         if self.tool_name is not None:
             result["tool"] = str(self.tool_name)
         if self.tool_args is not None:
             result["args"] = _safe_serialize(self.tool_args)
         if self.tool_result is not None:
             result["result"] = _safe_serialize(self.tool_result)
-        if self.to_agent is not None:
-            result["to_agent"] = str(self.to_agent)
-        if self.from_agent is not None:
-            result["from_agent"] = str(self.from_agent)
-        if self.task is not None:
-            result["task"] = str(self.task)
-        if self.status is not None:
-            result["status"] = str(self.status)
         if self.thread_id is not None:
             result["thread_id"] = str(self.thread_id)
         if self.error is not None:
@@ -196,26 +143,19 @@ class AgentEvent:
         return result
     
     def to_sse(self) -> str:
-        """
-        Convert to SSE format string.
-        
-        Returns:
-            String in format: "data: {json}\n\n"
-        """
+        """Convert to SSE format string."""
         try:
             data = self.to_dict()
             return f"data: {json.dumps(data)}\n\n"
         except TypeError as e:
-            # Log the problematic data for debugging
             logger.error(f"JSON serialization error: {e}")
-            logger.error(f"Event type: {self.type}, tool_result type: {type(self.tool_result)}")
-            # Return a safe fallback
             safe_data = {
                 "type": self.type.value if isinstance(self.type, EventType) else str(self.type),
                 "error": f"Serialization error: {str(e)}"
             }
             return f"data: {json.dumps(safe_data)}\n\n"
     
+    # Factory methods for common events
     @classmethod
     def token(cls, content: str) -> "AgentEvent":
         """Create a token event for streaming text."""
@@ -238,56 +178,13 @@ class AgentEvent:
         data: Dict[str, Any],
         tool_category: Optional[str] = None
     ) -> "AgentEvent":
-        """
-        Create event with full structured tool data for frontend rendering.
-        
-        This event carries the complete tool result without truncation,
-        allowing the frontend to render rich UI components based on
-        the structured data.
-        
-        Args:
-            tool_name: Name of the tool that produced this data
-            data: Full structured result from the tool
-            tool_category: Optional category (e.g., 'seo', 'analytics')
-            
-        Returns:
-            AgentEvent with TOOL_DATA type
-        """
+        """Create event with full structured tool data for frontend rendering."""
         return cls(
             type=EventType.TOOL_DATA,
             tool_name=tool_name,
             tool_result=data,
             metadata={"category": tool_category} if tool_category else {}
         )
-    
-    @classmethod
-    def delegate(cls, to_agent: str, task: str, from_agent: Optional[str] = None) -> "AgentEvent":
-        """Create event for delegating to another agent."""
-        return cls(
-            type=EventType.DELEGATE, 
-            to_agent=to_agent, 
-            task=task,
-            from_agent=from_agent
-        )
-    
-    @classmethod
-    def agent_switch(cls, to_agent: str, from_agent: Optional[str] = None) -> "AgentEvent":
-        """Create event when switching to a different agent."""
-        return cls(
-            type=EventType.AGENT_SWITCH, 
-            to_agent=to_agent,
-            from_agent=from_agent
-        )
-    
-    @classmethod
-    def thinking(cls, status: str = "Thinking...") -> "AgentEvent":
-        """Create event for agent thinking status."""
-        return cls(type=EventType.THINKING, status=status)
-    
-    @classmethod
-    def status_update(cls, status: str) -> "AgentEvent":
-        """Create a general status update event."""
-        return cls(type=EventType.STATUS, status=status)
     
     @classmethod
     def end(cls) -> "AgentEvent":
@@ -303,14 +200,9 @@ class AgentEvent:
     def with_thread_id(cls, thread_id: str) -> "AgentEvent":
         """Create event containing thread ID."""
         return cls(type=EventType.THREAD_ID, thread_id=thread_id)
-    
-    @classmethod
-    def with_metadata(cls, **kwargs) -> "AgentEvent":
-        """Create event with custom metadata."""
-        return cls(type=EventType.METADATA, metadata=kwargs)
 
 
-# Convenience constants for SSE
+# SSE constants
 SSE_DONE = "data: [DONE]\n\n"
 
 
@@ -320,5 +212,5 @@ def event_stream_headers() -> Dict[str, str]:
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "Content-Type": "text/event-stream",
-        "X-Accel-Buffering": "no",  # Disable nginx buffering
+        "X-Accel-Buffering": "no",
     }

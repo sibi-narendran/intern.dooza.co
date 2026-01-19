@@ -44,6 +44,9 @@ class AgentConfig:
         min_tier: Minimum user tier required to use this agent
         is_published: Whether agent is visible in gallery
         is_featured: Whether agent is featured
+        
+        uses_tools: Whether agent uses the new DoozaAgent system with tools
+        is_specialist: Whether agent is a hidden specialist (not user-facing)
     """
     
     # Identity
@@ -72,6 +75,10 @@ class AgentConfig:
     is_published: bool = True
     is_featured: bool = False
     
+    # Agent type flags
+    uses_tools: bool = False  # Uses the new DoozaAgent system with tools
+    is_specialist: bool = False  # Hidden specialist agent (not user-facing)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -91,6 +98,8 @@ class AgentConfig:
             "min_tier": self.min_tier,
             "is_published": self.is_published,
             "is_featured": self.is_featured,
+            "uses_tools": self.uses_tools,
+            "is_specialist": self.is_specialist,
         }
     
     @classmethod
@@ -113,6 +122,8 @@ class AgentConfig:
             min_tier=data.get("min_tier", "free"),
             is_published=data.get("is_published", True),
             is_featured=data.get("is_featured", False),
+            uses_tools=data.get("uses_tools", False),
+            is_specialist=data.get("is_specialist", False),
         )
     
     @classmethod
@@ -139,4 +150,6 @@ class AgentConfig:
             min_tier=row.get("tier", "free"),
             is_published=row.get("is_published", True),
             is_featured=row.get("is_featured", False),
+            uses_tools=row.get("uses_tools", False),
+            is_specialist=row.get("is_specialist", False),
         )

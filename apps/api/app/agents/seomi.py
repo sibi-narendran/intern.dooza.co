@@ -1,154 +1,178 @@
 """
-Seomi Agent
+SEOmi - SEO Lead Orchestrator Agent
 
-SEO Expert AI agent that analyzes websites and provides
-actionable recommendations for improving search rankings.
+Uses LangGraph's create_supervisor for standard multi-agent pattern.
+SEOmi supervises seo-tech, seo-content, and seo-analytics specialists.
 
-Capabilities:
-- Website SEO audit
-- Meta tag analysis
-- Heading structure review
-- Image alt tag audit
-- Keyword analysis
-- Content recommendations
+This is the production-grade, standard LangGraph architecture.
 """
 
-from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional
 
-from app.agents.config import AgentConfig
-from app.agents.base import DoozaAgent
+from langchain_openai import ChatOpenAI
+from langgraph_supervisor import create_supervisor
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
-if TYPE_CHECKING:
-    from app.context.types import AgentContext
-    from app.tools.registry import ToolRegistry
+from app.config import get_settings
+from app.agents.seo_tech import create_seo_tech_agent
+from app.agents.seo_content import create_seo_content_agent
+from app.agents.seo_analytics import create_seo_analytics_agent
 
 
-# ============================================================================
-# Seomi Configuration
-# ============================================================================
+# =============================================================================
+# SYSTEM PROMPT
+# =============================================================================
 
-SEOMI_SYSTEM_PROMPT = """You are Seomi, an expert SEO analyst AI created by Dooza.
+SEOMI_SYSTEM_PROMPT = """You are SEOmi, the SEO Lead at Dooza.
 
 ## Your Role
-You help users improve their website's search engine rankings by analyzing their sites and providing expert advice.
+You are the user-facing SEO expert. Users talk to you for all SEO needs.
+You have a team of specialists that you delegate to for specific tasks.
 
-## Your Personality
-- Professional but approachable
-- Data-driven and precise
-- Explain technical concepts clearly
-- Always provide actionable next steps
+## Your Team (Specialists)
+1. **seo_tech** - Technical SEO Specialist
+   - Has tools for: URL analysis, meta tags, headings, images, keywords
+   - Delegate: technical audits, page analysis, site issues
 
-## Your Tools
-Use these SEO analysis tools when the user provides a URL:
+2. **seo_content** - Content SEO Specialist  
+   - Coming soon: keyword research, content gaps, content briefs
+   - Currently: provides guidance on content strategy
 
-1. **seo_analyze_url** - Comprehensive SEO audit (meta tags, headings, images, keywords)
-2. **seo_audit_meta_tags** - Check title, description, Open Graph tags
-3. **seo_analyze_headings** - Analyze H1-H6 heading structure
-4. **seo_check_images** - Audit image alt tags
-5. **seo_extract_keywords** - Extract top keywords from page content
+3. **seo_analytics** - Analytics SEO Specialist
+   - Coming soon: GSC data, rankings, traffic analysis
+   - Requires: Google Search Console / Analytics integration
 
-## IMPORTANT: How Results Are Displayed
-When you use a tool, the results are automatically displayed to the user in a visual dashboard showing:
-- Score gauges with color-coded ratings
-- Issue lists with priority levels
-- Meta tag details with length indicators
-- Heading hierarchy visualization
-- Image alt tag coverage charts
-- Keyword density analysis
+## How You Work
+1. User asks an SEO question
+2. You decide which specialist can help (or answer directly if simple)
+3. You delegate to the specialist using the transfer tools
+4. Specialist does the work and returns results
+5. You interpret results and present to the user in a friendly way
 
-**You do NOT need to list or format this data** - the UI handles it automatically!
+## When to Delegate
+- "Analyze this URL" → delegate to seo_tech
+- "Audit my site" → delegate to seo_tech
+- "Check my meta tags" → delegate to seo_tech
+- "Keyword research for X" → delegate to seo_content (coming soon)
+- "How are my rankings?" → delegate to seo_analytics (requires GSC)
 
-## Your Job: Provide Expert Commentary
-After the tool results are displayed, your role is to:
+## When to Answer Directly
+- General SEO questions and advice
+- Explaining SEO concepts
+- Discussing strategy at a high level
 
-1. **Summarize key insights** - What's most important?
-2. **Explain the WHY** - Why does each issue matter for SEO?
-3. **Give specific fixes** - Exactly what should they change?
-4. **Prioritize actions** - What to fix first for biggest impact?
-5. **Be encouraging** - SEO is a journey, celebrate wins!
+## Your Communication Style
+- Friendly and professional
+- Explain technical findings in simple terms
+- Always provide actionable recommendations
+- Prioritize issues by impact (critical → important → nice-to-have)
 
-### Example Response Style:
-"Great news - your site has a solid foundation! Here's what I recommend focusing on:
+## Presenting Results
+After receiving specialist results:
+1. Summarize key findings
+2. Explain why each issue matters
+3. Give specific, actionable fixes
+4. Prioritize what to fix first
+5. Offer next steps
 
-**Top Priority: Fix Your Meta Description**
-Your page is missing a meta description, which means Google will auto-generate one. Write a compelling 150-160 character description that includes your target keyword. This directly impacts click-through rates.
+Example:
+"I've analyzed your site. Here's what matters most:
 
-**Quick Win: Add Alt Text to Images**
-5 images are missing alt text. For each image, describe what it shows in 5-10 words. This helps both SEO and accessibility.
+**🔴 Critical - Fix These First**
+- No H1 heading (hurts SEO significantly)
+- Title tag too short
 
-**Looking Good:**
-✓ Your H1 heading is well-structured
-✓ Good keyword density for 'web development'
+**🟡 Important - This Week**
+- Missing meta description on 3 pages
 
-Want me to help you write that meta description?"
+Would you like me to help you fix any of these?"
 
-## When User Asks General SEO Questions
-- Answer based on your expertise
-- Provide practical examples
-- Offer to analyze their site if relevant
-
-## Delegation
-For content writing based on SEO findings, you can work with Penn (content writer) to create optimized content.
-
-Remember: The visual dashboard shows all the data. Your job is to be the expert advisor who explains what it means and what to do about it."""
-
-
-SEOMI_CONFIG = AgentConfig(
-    slug="seomi",
-    name="Seomi",
-    role="SEO Expert",
-    description="Analyzes websites and provides actionable SEO recommendations to improve search rankings.",
-    system_prompt=SEOMI_SYSTEM_PROMPT,
-    
-    # Tool permissions
-    tool_categories=["seo"],
-    allowed_integrations=["google_search_console", "google_analytics", "ahrefs"],
-    can_delegate_to=["penn", "soshie"],
-    
-    # Ownership (Dooza-created agent)
-    owner_type="dooza",
-    owner_id=None,
-    
-    # UI
-    avatar_url="https://api.dicebear.com/7.x/lorelei/svg?seed=Sarah&backgroundColor=c0aede",
-    gradient="linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)",
-    
-    # Access
-    min_tier="free",
-    is_published=True,
-    is_featured=True,
-)
+## Important Rules
+- NEVER say "I can't access websites" - you CAN via seo_tech
+- NEVER make up data - only report what specialists return
+- ALWAYS delegate technical tasks to specialists
+- ALWAYS interpret results for the user (don't just dump data)
+"""
 
 
-# ============================================================================
-# Agent Factory
-# ============================================================================
+# =============================================================================
+# SUPERVISOR FACTORY
+# =============================================================================
 
-def create_seomi_agent(
-    tool_registry: "ToolRegistry",
-    context: "AgentContext",
-    checkpointer=None,
-) -> DoozaAgent:
+def create_seomi_supervisor(
+    model: ChatOpenAI | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> Any:
     """
-    Create a Seomi agent instance.
+    Create the SEOmi supervisor agent using LangGraph's create_supervisor.
+    
+    This is the standard LangGraph multi-agent pattern where:
+    - SEOmi is the supervisor that routes to specialists
+    - Specialists are create_react_agent instances with their tools
+    - Handoff is automatic via transfer tools
     
     Args:
-        tool_registry: Registry to get SEO tools from
-        context: User/org context for permissions
-        checkpointer: Optional LangGraph checkpointer
+        model: Optional ChatOpenAI for the supervisor. Uses default if not provided.
+        checkpointer: Optional checkpointer for conversation persistence.
         
     Returns:
-        Configured DoozaAgent instance for Seomi
+        A compiled LangGraph supervisor workflow.
     """
-    return DoozaAgent(
-        config=SEOMI_CONFIG,
-        tool_registry=tool_registry,
-        context=context,
-        checkpointer=checkpointer,
+    if model is None:
+        settings = get_settings()
+        model = ChatOpenAI(
+            api_key=settings.openai_api_key,  # Explicitly pass API key from settings
+            model=settings.openai_model or "gpt-4o",  # Supervisor uses better model
+            temperature=0.7,
+            streaming=True,
+        )
+    
+    # Create specialist agents
+    seo_tech = create_seo_tech_agent()
+    seo_content = create_seo_content_agent()
+    seo_analytics = create_seo_analytics_agent()
+    
+    # Create the supervisor workflow
+    # This automatically creates handoff tools for transferring to specialists
+    workflow = create_supervisor(
+        agents=[seo_tech, seo_content, seo_analytics],
+        model=model,
+        prompt=SEOMI_SYSTEM_PROMPT,
+        # Only show SEOmi's final response, not specialist internal messages
+        output_mode="last_message",
     )
+    
+    # Compile with optional checkpointer
+    if checkpointer:
+        return workflow.compile(checkpointer=checkpointer)
+    else:
+        return workflow.compile()
 
 
-def get_seomi_config() -> AgentConfig:
-    """Get Seomi's configuration."""
-    return SEOMI_CONFIG
+# =============================================================================
+# CONVENIENCE EXPORTS
+# =============================================================================
+
+def get_seomi_app(checkpointer: BaseCheckpointSaver | None = None):
+    """
+    Get a compiled SEOmi supervisor app ready for invocation.
+    
+    Args:
+        checkpointer: Optional checkpointer for conversation persistence.
+        
+    Returns:
+        Compiled supervisor workflow.
+    """
+    return create_seomi_supervisor(checkpointer=checkpointer)
+
+
+# Keep for backward compatibility during transition
+SEOMI_CONFIG = {
+    "slug": "seomi",
+    "name": "SEOmi",
+    "title": "SEO Expert",
+    "description": "Your AI SEO lead - handles technical audits, content strategy, and analytics.",
+    "domain": "seo",
+    "avatar_gradient": "from-emerald-500 to-teal-600",
+    "avatar_icon": "TrendingUp",
+}

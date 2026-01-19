@@ -1,3 +1,13 @@
+"""
+Dooza AI API - Main Application
+
+Standard LangGraph production setup:
+- PostgreSQL checkpointer for conversation memory
+- Custom FastAPI routes for HTTP handling
+- Native LangGraph event streaming for full visibility
+- Memory persists across requests via thread_id
+"""
+
 from contextlib import asynccontextmanager
 import logging
 
@@ -5,23 +15,35 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import health, chat, integrations, gallery
+from app.routers import health, integrations, gallery
+from app.routers.langgraph_api import setup_langgraph_routes
 from app.core.database import init_checkpointer, close_checkpointer
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle - startup and shutdown."""
-    # Startup - try to init DB but don't fail if it's not available
+    """
+    Manage application lifecycle - startup and shutdown.
+    
+    Standard LangGraph production pattern:
+    1. Initialize checkpointer FIRST (for memory)
+    2. Setup LangGraph routes AFTER (so they have checkpointer)
+    """
     logger.info("Starting Dooza AI API...")
+    
+    # Step 1: Initialize PostgreSQL checkpointer for conversation memory
     try:
         await init_checkpointer()
+        logger.info("Checkpointer initialized - memory persistence enabled")
     except Exception as e:
-        logger.warning(f"Database init failed (will retry on first request): {e}")
+        logger.warning(f"Database init failed (memory will not persist): {e}")
+    
+    # Step 2: Setup LangGraph routes AFTER checkpointer is ready
+    # This ensures the supervisor is compiled WITH the checkpointer
+    setup_langgraph_routes(app)
     
     yield
     
@@ -63,11 +85,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
-    # Routers
+    # Standard routers
     app.include_router(health.router, tags=["Health"])
-    app.include_router(chat.router, prefix="/v1", tags=["Chat"])
     app.include_router(integrations.router, prefix="/v1/integrations", tags=["Integrations"])
     app.include_router(gallery.router, prefix="/v1", tags=["Gallery"])
+    
+    # Note: LangGraph routes are added in lifespan AFTER checkpointer init
     
     return app
 

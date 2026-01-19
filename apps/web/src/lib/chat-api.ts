@@ -1,10 +1,15 @@
 /**
  * Chat API Client
  * 
- * Handles streaming chat communication with agents via SSE.
+ * Uses standard LangGraph streaming via /stream_events endpoint.
+ * Parses native LangGraph events for full visibility into:
+ * - Token streaming from all agents (supervisor + specialists)
+ * - Tool execution (including SEO analysis tools)
+ * - Delegation events (transfer_to_* tools)
  * 
  * Production-ready with:
  * - Type-safe event handling
+ * - Full visibility into agent activity
  * - Proper error recovery
  * - Connection cleanup
  * - Request timeouts
@@ -79,11 +84,12 @@ export interface ToolCall {
 }
 
 export interface ChatCallbacks {
-  onToken?: (content: string) => void
+  onToken?: (content: string, agent?: string) => void
   onToolStart?: (toolName: string, args?: Record<string, unknown>) => void
   onToolEnd?: (toolName: string, result?: unknown) => void
   onToolData?: (toolData: ToolData) => void  // Full structured data for UI rendering
-  onDelegate?: (toAgent: string, task: string) => void
+  onDelegate?: (toAgent: string) => void
+  onAgentSwitch?: (agent: string) => void
   onStatus?: (status: string) => void
   onThreadId?: (threadId: string) => void
   onError?: (error: string) => void
@@ -103,14 +109,11 @@ async function getAuthToken(): Promise<string> {
 }
 
 // ============================================================================
-// SSE Streaming Chat
+// LangGraph Streaming Chat
 // ============================================================================
 
 /**
  * Validate message before sending.
- * 
- * @param message - The message to validate
- * @throws Error if message is invalid
  */
 function validateMessage(message: string): void {
   if (!message || typeof message !== 'string') {
@@ -128,16 +131,18 @@ function validateMessage(message: string): void {
 }
 
 /**
- * Stream a chat message to an agent.
+ * Stream a chat message using LangGraph's /stream_events endpoint.
  * 
- * Uses Server-Sent Events to receive streaming responses.
+ * Uses standard LangGraph astream_events() for full visibility into:
+ * - All agent tokens (supervisor + specialists)
+ * - Tool execution (SEO tools)
+ * - Delegation (transfer_to_* tools)
  * 
  * @param agentSlug - The agent to chat with (e.g., 'seomi')
  * @param message - The user's message
  * @param callbacks - Callback functions for different event types
  * @param threadId - Optional thread ID for conversation continuity
  * @returns Promise that resolves when stream completes
- * @throws Error if authentication fails or request fails
  */
 export async function streamChat(
   agentSlug: string,
@@ -153,23 +158,35 @@ export async function streamChat(
   
   const token = await getAuthToken()
   
-  // Create abort controller for timeout
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   
+  const generatedThreadId = threadId || `thread_${Date.now()}`
+  
+  const payload = {
+    input: {
+      messages: [
+        { type: 'human', content: message.trim() }
+      ]
+    },
+    config: {
+      configurable: {
+        thread_id: generatedThreadId
+      }
+    }
+  }
+  
   let response: Response
   try {
-    response = await fetch(`${API_BASE}/v1/chat/${agentSlug}`, {
+    // Use /stream_events for full visibility (native LangGraph events)
+    response = await fetch(`${API_BASE}/langserve/${agentSlug}/stream_events`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
       },
-      body: JSON.stringify({
-        message: message.trim(),
-        thread_id: threadId || null,
-      }),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     })
   } catch (fetchError) {
@@ -194,99 +211,112 @@ export async function streamChat(
   
   const decoder = new TextDecoder()
   let buffer = ''
-  let resultThreadId = threadId || ''
+  let currentAgent = 'agent' // Track which agent is currently active
   
   try {
+    callbacks.onThreadId?.(generatedThreadId)
+    
     while (true) {
       const { done, value } = await reader.read()
       
       if (done) {
+        callbacks.onEnd?.()
         break
       }
       
       buffer += decoder.decode(value, { stream: true })
       
-      // Process complete events from buffer
       const lines = buffer.split('\n')
-      buffer = lines.pop() || '' // Keep incomplete line in buffer
+      buffer = lines.pop() || ''
       
       for (const line of lines) {
         if (!line.startsWith('data: ')) {
           continue
         }
         
-        const data = line.slice(6) // Remove 'data: ' prefix
+        const data = line.slice(6).trim()
         
-        if (data === '[DONE]') {
+        if (!data || data === '[DONE]') {
           callbacks.onEnd?.()
           continue
         }
         
         try {
-          const event: ChatEvent = JSON.parse(data)
+          const event = JSON.parse(data)
+          const eventType = event.event
+          const metadata = event.metadata || {}
+          const langgraphNode = metadata.langgraph_node || ''
           
-          switch (event.type) {
-            case 'token':
-              if (event.content) {
-                callbacks.onToken?.(event.content)
-              }
-              break
-              
-            case 'tool_start':
-              if (event.tool) {
-                callbacks.onToolStart?.(event.tool, event.args)
-              }
-              break
-              
-            case 'tool_end':
-              if (event.tool) {
-                callbacks.onToolEnd?.(event.tool, event.result)
-              }
-              break
-            
-            case 'tool_data':
-              // Full structured tool data for UI rendering
-              if (event.tool && event.result) {
-                callbacks.onToolData?.({
-                  tool: event.tool,
-                  data: event.result as Record<string, unknown>,
-                  category: event.metadata?.category || 'general',
-                })
-              }
-              break
-              
-            case 'delegate':
-              if (event.to_agent && event.task) {
-                callbacks.onDelegate?.(event.to_agent, event.task)
-              }
-              break
-              
-            case 'thinking':
-            case 'status':
-              if (event.status) {
-                callbacks.onStatus?.(event.status)
-              }
-              break
-              
-            case 'thread_id':
-              if (event.thread_id) {
-                resultThreadId = event.thread_id
-                callbacks.onThreadId?.(event.thread_id)
-              }
-              break
-              
-            case 'error':
-              if (event.error) {
-                callbacks.onError?.(event.error)
-              }
-              break
-              
-            case 'end':
-              callbacks.onEnd?.()
-              break
+          // Track agent switches
+          if (langgraphNode && langgraphNode !== currentAgent) {
+            currentAgent = langgraphNode
+            callbacks.onAgentSwitch?.(langgraphNode)
           }
+          
+          // Handle token streaming from all agents
+          if (eventType === 'on_chat_model_stream') {
+            const content = event.content || ''
+            if (content) {
+              callbacks.onToken?.(content, langgraphNode)
+            }
+          }
+          
+          // Handle tool start events
+          else if (eventType === 'on_tool_start') {
+            const toolName = event.name || ''
+            const toolInput = event.input || {}
+            
+            // Check for delegation (transfer_to_* tools)
+            if (toolName.startsWith('transfer_to_')) {
+              const targetAgent = toolName.replace('transfer_to_', '')
+              callbacks.onDelegate?.(targetAgent)
+            } else {
+              callbacks.onToolStart?.(toolName, toolInput)
+            }
+          }
+          
+          // Handle tool end events
+          else if (eventType === 'on_tool_end') {
+            const toolName = event.name || ''
+            const toolOutput = event.output
+            
+            // Skip delegation tool outputs (internal)
+            if (toolName.startsWith('transfer_to_')) {
+              continue
+            }
+            
+            callbacks.onToolEnd?.(toolName, toolOutput)
+            
+            // Check if output contains SEO data for rich rendering
+            if (toolOutput) {
+              try {
+                const parsed = typeof toolOutput === 'string' ? JSON.parse(toolOutput) : toolOutput
+                if (parsed.overall_score !== undefined) {
+                  callbacks.onToolData?.({
+                    tool: toolName,
+                    data: parsed,
+                    category: 'seo',
+                  })
+                }
+              } catch {
+                // Not SEO JSON data
+              }
+            }
+          }
+          
+          // Handle chain end (final output)
+          else if (eventType === 'on_chain_end' && event.name === 'LangGraph') {
+            callbacks.onEnd?.()
+          }
+          
+          // Handle errors
+          else if (eventType === 'error') {
+            callbacks.onError?.(event.data?.message || 'Unknown error')
+          }
+          
         } catch (parseError) {
-          console.warn('Failed to parse SSE event:', data, parseError)
+          // Log but don't fail on parse errors
+          console.warn('Failed to parse stream event:', data)
         }
       }
     }
@@ -294,74 +324,9 @@ export async function streamChat(
     reader.releaseLock()
   }
   
-  return { threadId: resultThreadId }
+  return { threadId: generatedThreadId }
 }
 
-// ============================================================================
-// Thread History
-// ============================================================================
-
-/**
- * Get conversation history for a thread.
- * 
- * @param threadId - The thread ID
- * @returns Array of messages
- */
-export async function getThreadHistory(threadId: string): Promise<Message[]> {
-  const token = await getAuthToken()
-  
-  const response = await fetch(
-    `${API_BASE}/v1/threads/${threadId}/messages`,
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    }
-  )
-  
-  if (!response.ok) {
-    console.error('Failed to fetch thread history')
-    return []
-  }
-  
-  const data = await response.json()
-  return data.messages || []
-}
-
-/**
- * List all threads for the current user.
- * 
- * @param agentSlug - Optional filter by agent
- * @returns Array of thread summaries
- */
-export async function listThreads(agentSlug?: string): Promise<Array<{
-  thread_id: string
-  agent_id: string
-  updated_at: string
-}>> {
-  const token = await getAuthToken()
-  
-  const params = new URLSearchParams()
-  if (agentSlug) {
-    params.set('agent_id', agentSlug)
-  }
-  
-  const response = await fetch(
-    `${API_BASE}/v1/threads?${params}`,
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    }
-  )
-  
-  if (!response.ok) {
-    return []
-  }
-  
-  const data = await response.json()
-  return data.threads || []
-}
 
 // ============================================================================
 // Utility Functions
@@ -378,11 +343,27 @@ export function generateMessageId(): string {
  * Format tool name for display.
  */
 export function formatToolName(toolName: string): string {
-  // 'seo.analyze_url' -> 'Analyze URL'
+  // 'seo_analyze_url' -> 'Seo Analyze Url'
+  // 'transfer_to_seo_tech' -> 'Transfer To Seo Tech'
   const parts = toolName.split('.')
   const name = parts[parts.length - 1]
   return name
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/**
+ * Format agent name for display.
+ */
+export function formatAgentName(agentName: string): string {
+  // 'seo_tech' -> 'SEO Tech'
+  // 'agent' -> 'SEOmi' (supervisor)
+  if (agentName === 'agent') {
+    return 'SEOmi'
+  }
+  return agentName
+    .split('_')
+    .map(word => word.toUpperCase() === 'SEO' ? 'SEO' : word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }

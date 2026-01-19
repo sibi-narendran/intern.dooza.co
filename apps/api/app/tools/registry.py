@@ -144,6 +144,9 @@ class ToolRegistry:
         2. User's tier (free/pro/enterprise)
         3. Available integrations
         
+        Note: Delegation is now handled by langgraph-supervisor,
+        not via a custom delegation tool.
+        
         Args:
             agent_config: The agent's configuration
             context: Current user/org context

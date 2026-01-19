@@ -73,7 +73,11 @@ def get_supabase_client() -> Any:
 async def init_checkpointer() -> None:
     """
     Initialize the database connection pool and LangGraph checkpointer.
-    Tables are created manually - we skip auto-setup.
+    
+    Standard LangGraph production pattern:
+    - Creates connection pool
+    - Initializes checkpointer
+    - Runs setup() to ensure tables exist and are up-to-date
     
     Thread-safe async initialization.
     """
@@ -108,8 +112,11 @@ async def init_checkpointer() -> None:
             )
             await _pool.open()
             
-            # Create checkpointer - tables already exist, skip setup
+            # Create checkpointer
             _checkpointer = AsyncPostgresSaver(_pool)
+            
+            # Standard LangGraph pattern: ensure tables exist and are up-to-date
+            await _checkpointer.setup()
             
             logger.info("Database checkpointer initialized successfully")
             
