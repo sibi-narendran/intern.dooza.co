@@ -9,6 +9,24 @@ import Dashboard from './pages/Dashboard'
 import IntegrationsPage from './pages/IntegrationsPage'
 import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import WorkforceGalleryPage from './pages/WorkforceGalleryPage'
+import ChatPage from './pages/ChatPage'
+
+// Layout wrapper for main app pages (with sidebar and navbar)
+function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <AgentModalProvider>
+      <div className="app-shell">
+        <Sidebar />
+        <div className="app-shell__main">
+          <Navbar />
+          <main className="app-shell__content">
+            {children}
+          </main>
+        </div>
+      </div>
+    </AgentModalProvider>
+  )
+}
 
 function App() {
   return (
@@ -16,23 +34,39 @@ function App() {
       <AuthProvider>
         <Router>
           <ProtectedRoute>
-            <AgentModalProvider>
-              <div className="app-shell">
-                <Sidebar />
-                <div className="app-shell__main">
-                  <Navbar />
-                  <main className="app-shell__content">
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/integrations" element={<IntegrationsPage />} />
-                      <Route path="/knowledge" element={<KnowledgeBasePage />} />
-                      <Route path="/gallery" element={<WorkforceGalleryPage />} />
-                      <Route path="*" element={<Dashboard />} />
-                    </Routes>
-                  </main>
-                </div>
-              </div>
-            </AgentModalProvider>
+            <Routes>
+              {/* Chat page - full screen without sidebar/navbar */}
+              <Route path="/chat/:agentSlug" element={<ChatPage />} />
+              
+              {/* Main app pages with sidebar/navbar */}
+              <Route path="/" element={
+                <AppLayout>
+                  <Dashboard />
+                </AppLayout>
+              } />
+              <Route path="/integrations" element={
+                <AppLayout>
+                  <IntegrationsPage />
+                </AppLayout>
+              } />
+              <Route path="/knowledge" element={
+                <AppLayout>
+                  <KnowledgeBasePage />
+                </AppLayout>
+              } />
+              <Route path="/gallery" element={
+                <AppLayout>
+                  <WorkforceGalleryPage />
+                </AppLayout>
+              } />
+              
+              {/* Fallback */}
+              <Route path="*" element={
+                <AppLayout>
+                  <Dashboard />
+                </AppLayout>
+              } />
+            </Routes>
           </ProtectedRoute>
         </Router>
       </AuthProvider>

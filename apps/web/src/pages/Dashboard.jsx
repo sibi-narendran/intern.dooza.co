@@ -50,19 +50,27 @@ const Dashboard = () => {
         fetchTeam();
     }, [fetchTeam]);
 
-    // Handle agent click - open modal with agent data
+    // Agents that have chat capability (tool-enabled)
+    const CHAT_ENABLED_AGENTS = ['seomi'];
+
+    // Handle agent click - navigate to chat for enabled agents, otherwise open modal
     const handleAgentClick = (agent) => {
-        // Transform hired agent to modal format
-        openAgentModal({
-            id: agent.slug,
-            name: agent.name,
-            role: agent.role,
-            desc: agent.description,
-            avatar: agent.avatar_url,
-            gradient: agent.gradient,
-            capabilities: agent.capabilities,
-            integrations: agent.integrations
-        });
+        if (CHAT_ENABLED_AGENTS.includes(agent.slug)) {
+            // Navigate to chat page
+            navigate(`/chat/${agent.slug}`);
+        } else {
+            // Transform hired agent to modal format
+            openAgentModal({
+                id: agent.slug,
+                name: agent.name,
+                role: agent.role,
+                desc: agent.description,
+                avatar: agent.avatar_url,
+                gradient: agent.gradient,
+                capabilities: agent.capabilities,
+                integrations: agent.integrations
+            });
+        }
     };
 
     return (

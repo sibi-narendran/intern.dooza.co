@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { 
   Users, Building2, Search, Star, Sparkles, 
-  Download, Loader2, Check, AlertCircle, Plus, X
+  Download, Loader2, Check, AlertCircle, Plus, X, MessageSquare
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { 
@@ -387,6 +388,9 @@ export default function WorkforceGalleryPage() {
 // Agent Card Component
 // ============================================================================
 
+// Agents that have chat capability (tool-enabled)
+const CHAT_ENABLED_AGENTS = ['seomi']
+
 interface AgentCardProps {
   agent: GalleryAgent
   isHired: boolean
@@ -397,6 +401,8 @@ interface AgentCardProps {
 }
 
 function AgentCard({ agent, isHired, onHire, onRemove, isHiring, isRemoving }: AgentCardProps) {
+  const navigate = useNavigate()
+  const isChatEnabled = CHAT_ENABLED_AGENTS.includes(agent.slug)
   return (
     <div
       style={{
@@ -526,59 +532,83 @@ function AgentCard({ agent, isHired, onHire, onRemove, isHiring, isRemoving }: A
           </span>
         </div>
         
-        {!isHired ? (
-          <button 
-            onClick={onHire}
-            disabled={isHiring}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              background: 'var(--primary-600)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontWeight: '600',
-              cursor: isHiring ? 'not-allowed' : 'pointer',
-              opacity: isHiring ? 0.6 : 1
-            }}
-          >
-            {isHiring ? (
-              <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-            ) : (
-              <Download size={14} />
-            )}
-            Install
-          </button>
-        ) : (
-          <button 
-            onClick={onRemove}
-            disabled={isRemoving}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              background: 'transparent',
-              color: 'var(--gray-600)',
-              border: '1px solid var(--gray-300)',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontWeight: '500',
-              cursor: isRemoving ? 'not-allowed' : 'pointer',
-              opacity: isRemoving ? 0.6 : 1
-            }}
-          >
-            {isRemoving ? (
-              <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-            ) : (
-              <X size={14} />
-            )}
-            Remove
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {isHired && isChatEnabled && (
+            <button 
+              onClick={() => navigate(`/chat/${agent.slug}`)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                background: 'var(--primary-600)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              <MessageSquare size={14} />
+              Chat
+            </button>
+          )}
+          
+          {!isHired ? (
+            <button 
+              onClick={onHire}
+              disabled={isHiring}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                background: 'var(--primary-600)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: isHiring ? 'not-allowed' : 'pointer',
+                opacity: isHiring ? 0.6 : 1
+              }}
+            >
+              {isHiring ? (
+                <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <Download size={14} />
+              )}
+              Install
+            </button>
+          ) : (
+            <button 
+              onClick={onRemove}
+              disabled={isRemoving}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                background: 'transparent',
+                color: 'var(--gray-600)',
+                border: '1px solid var(--gray-300)',
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontWeight: '500',
+                cursor: isRemoving ? 'not-allowed' : 'pointer',
+                opacity: isRemoving ? 0.6 : 1
+              }}
+            >
+              {isRemoving ? (
+                <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <X size={14} />
+              )}
+              Remove
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
