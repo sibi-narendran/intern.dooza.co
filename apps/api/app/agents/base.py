@@ -324,6 +324,14 @@ class DoozaAgent:
                     tool_name = current_tool_calls.pop(run_id, "unknown")
                     
                     tool_output = event["data"].get("output")
+                    
+                    # Emit full structured data for specific tool categories
+                    # This allows frontend to render rich UI components
+                    if self._is_structured_tool(tool_name) and isinstance(tool_output, dict):
+                        tool_category = self._get_tool_category(tool_name)
+                        yield AgentEvent.tool_data(tool_name, tool_output, tool_category)
+                    
+                    # Also emit the standard tool_end with truncated display output
                     display_output = self._safe_serialize_output(tool_output)
                     yield AgentEvent.tool_end(tool_name, display_output)
             
@@ -335,6 +343,27 @@ class DoozaAgent:
         except Exception as e:
             logger.error(f"Agent {self.config.slug} error: {e}", exc_info=True)
             yield AgentEvent.create_error(str(e))
+    
+    # Tools that return structured data for frontend rendering
+    STRUCTURED_TOOLS = {
+        # SEO tools
+        "seo_analyze_url": "seo",
+        "seo_audit_meta_tags": "seo",
+        "seo_analyze_headings": "seo",
+        "seo_check_images": "seo",
+        "seo_extract_keywords": "seo",
+        # Add more categories as needed:
+        # "analytics_report": "analytics",
+        # "social_metrics": "social",
+    }
+    
+    def _is_structured_tool(self, tool_name: str) -> bool:
+        """Check if a tool returns structured data for frontend rendering."""
+        return tool_name in self.STRUCTURED_TOOLS
+    
+    def _get_tool_category(self, tool_name: str) -> str:
+        """Get the category of a structured tool."""
+        return self.STRUCTURED_TOOLS.get(tool_name, "general")
     
     def _safe_serialize_args(self, args: Any) -> Dict[str, Any]:
         """Safely serialize tool arguments for display."""

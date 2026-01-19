@@ -25,6 +25,7 @@ export type ChatEventType =
   | 'token'
   | 'tool_start'
   | 'tool_end'
+  | 'tool_data'  // Full structured tool results for UI rendering
   | 'delegate'
   | 'agent_switch'
   | 'thinking'
@@ -46,7 +47,19 @@ export interface ChatEvent {
   status?: string
   thread_id?: string
   error?: string
-  metadata?: Record<string, unknown>
+  metadata?: {
+    category?: string
+    [key: string]: unknown
+  }
+}
+
+/**
+ * Structured tool data for UI rendering
+ */
+export interface ToolData {
+  tool: string
+  data: Record<string, unknown>
+  category: string
 }
 
 export interface Message {
@@ -69,6 +82,7 @@ export interface ChatCallbacks {
   onToken?: (content: string) => void
   onToolStart?: (toolName: string, args?: Record<string, unknown>) => void
   onToolEnd?: (toolName: string, result?: unknown) => void
+  onToolData?: (toolData: ToolData) => void  // Full structured data for UI rendering
   onDelegate?: (toAgent: string, task: string) => void
   onStatus?: (status: string) => void
   onThreadId?: (threadId: string) => void
@@ -227,6 +241,17 @@ export async function streamChat(
             case 'tool_end':
               if (event.tool) {
                 callbacks.onToolEnd?.(event.tool, event.result)
+              }
+              break
+            
+            case 'tool_data':
+              // Full structured tool data for UI rendering
+              if (event.tool && event.result) {
+                callbacks.onToolData?.({
+                  tool: event.tool,
+                  data: event.result as Record<string, unknown>,
+                  category: event.metadata?.category || 'general',
+                })
               }
               break
               

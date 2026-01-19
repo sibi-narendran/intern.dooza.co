@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { 
   ArrowLeft, 
   Send, 
@@ -27,8 +27,12 @@ import {
   formatToolName,
   getThreadHistory,
   Message,
-  ToolCall 
+  ToolCall,
+  ToolData
 } from '../lib/chat-api'
+import MarkdownRenderer from '../components/MarkdownRenderer'
+import { SEOAnalysisCard } from '../components/seo'
+import { SEOAnalysisResult, isSEOAnalysisResult } from '../types/seo'
 
 // ============================================================================
 // Types
@@ -36,6 +40,7 @@ import {
 
 interface ChatMessage extends Message {
   agentSlug?: string
+  toolData?: ToolData[]  // Structured tool results for UI rendering
 }
 
 // ============================================================================
@@ -43,28 +48,107 @@ interface ChatMessage extends Message {
 // ============================================================================
 
 function ToolIndicator({ tool }: { tool: ToolCall }) {
-  const statusIcons = {
-    pending: <Loader2 className="animate-spin" size={14} />,
-    running: <Loader2 className="animate-spin" size={14} />,
-    complete: <CheckCircle2 size={14} style={{ color: '#22c55e' }} />,
-    error: <AlertCircle size={14} style={{ color: '#ef4444' }} />,
+  const statusConfig = {
+    pending: { 
+      icon: <Loader2 className="animate-spin" size={16} />,
+      text: 'Preparing...',
+      bgClass: '',
+    },
+    running: { 
+      icon: <Loader2 className="animate-spin" size={16} />,
+      text: 'Analyzing...',
+      bgClass: '',
+    },
+    complete: { 
+      icon: <CheckCircle2 size={16} style={{ color: '#16a34a' }} />,
+      text: 'Complete',
+      bgClass: 'tool-execution--complete',
+    },
+    error: { 
+      icon: <AlertCircle size={16} style={{ color: '#dc2626' }} />,
+      text: 'Failed',
+      bgClass: 'tool-execution--error',
+    },
   }
   
+  const status = statusConfig[tool.status]
+  
+  // Get tool description based on name
+  const getToolDescription = (name: string) => {
+    const descriptions: Record<string, string> = {
+      'seo_analyze_url': 'Running comprehensive SEO audit',
+      'seo_audit_meta_tags': 'Checking meta tags and Open Graph',
+      'seo_analyze_headings': 'Analyzing heading structure (H1-H6)',
+      'seo_check_images': 'Auditing image alt tags',
+      'seo_extract_keywords': 'Extracting top keywords',
+    }
+    return descriptions[name] || 'Processing...'
+  }
+  
+  // Get URL from args if available
+  const url = tool.args?.url as string | undefined
+  
   return (
-    <div style={{
+    <div className={`tool-execution ${status.bgClass}`} style={{
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '8px 12px',
-      background: 'var(--gray-100)',
-      borderRadius: '8px',
-      fontSize: '13px',
-      color: 'var(--gray-600)',
-      marginBottom: '8px',
+      gap: '12px',
+      padding: '12px 16px',
+      background: 'linear-gradient(135deg, var(--gray-50), white)',
+      border: '1px solid var(--gray-200)',
+      borderRadius: '12px',
+      marginBottom: '12px',
     }}>
-      <Wrench size={14} />
-      <span style={{ fontWeight: 500 }}>{formatToolName(tool.name)}</span>
-      {statusIcons[tool.status]}
+      <div style={{
+        width: '36px',
+        height: '36px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: tool.status === 'complete' ? '#dcfce7' : 
+                   tool.status === 'error' ? '#fef2f2' : 'var(--primary-100)',
+        color: tool.status === 'complete' ? '#16a34a' : 
+               tool.status === 'error' ? '#dc2626' : 'var(--primary-600)',
+        borderRadius: '10px',
+        flexShrink: 0,
+      }}>
+        <Wrench size={18} />
+      </div>
+      
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: '14px',
+          fontWeight: 600,
+          color: 'var(--gray-800)',
+        }}>
+          {formatToolName(tool.name)}
+        </div>
+        <div style={{
+          fontSize: '12px',
+          color: 'var(--gray-500)',
+          marginTop: '2px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}>
+          {tool.status === 'running' || tool.status === 'pending' ? (
+            getToolDescription(tool.name)
+          ) : url ? (
+            <span style={{ 
+              overflow: 'hidden', 
+              textOverflow: 'ellipsis', 
+              whiteSpace: 'nowrap',
+              maxWidth: '200px',
+            }}>
+              {url}
+            </span>
+          ) : (
+            status.text
+          )}
+        </div>
+      </div>
+      
+      {status.icon}
     </div>
   )
 }
@@ -146,10 +230,10 @@ function MessageBubble({
       
       {/* Content */}
       <div style={{
-        maxWidth: '70%',
+        maxWidth: isUser ? '70%' : '85%',  // Wider for assistant to show analysis cards
         display: 'flex',
         flexDirection: 'column',
-        gap: '4px',
+        gap: '12px',
       }}>
         {/* Working indicator - shows before any content */}
         {isWorking && (
@@ -161,20 +245,38 @@ function MessageBubble({
           <ToolIndicator key={idx} tool={tool} />
         ))}
         
-        {/* Message content */}
+        {/* Structured tool data - render with dedicated components */}
+        {message.toolData?.map((td, idx) => {
+          // Render SEO analysis results with dedicated component
+          if (td.category === 'seo' && isSEOAnalysisResult(td.data)) {
+            return (
+              <SEOAnalysisCard 
+                key={`tool-data-${idx}`} 
+                data={td.data as SEOAnalysisResult} 
+              />
+            )
+          }
+          return null
+        })}
+        
+        {/* Message content (LLM commentary) */}
         {message.content && (
           <div style={{
-            padding: '12px 16px',
+            padding: isUser ? '12px 16px' : '16px 20px',
             borderRadius: '16px',
             background: isUser ? 'var(--primary-600)' : 'white',
             color: isUser ? 'white' : 'var(--gray-800)',
             border: isUser ? 'none' : '1px solid var(--gray-200)',
             fontSize: '15px',
             lineHeight: '1.5',
-            whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
+            boxShadow: isUser ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.05)',
           }}>
-            {message.content}
+            {isUser ? (
+              <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
+            ) : (
+              <MarkdownRenderer content={message.content} />
+            )}
             {message.isStreaming && (
               <span style={{
                 display: 'inline-block',
@@ -199,7 +301,7 @@ function MessageBubble({
 export default function ChatPage() {
   const { agentSlug } = useParams<{ agentSlug: string }>()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  useAuth() // Ensure user is authenticated
   
   // Agent info
   const [agent, setAgent] = useState<GalleryAgent | null>(null)
@@ -327,6 +429,7 @@ export default function ChatPage() {
       content: '',
       timestamp: new Date(),
       toolCalls: [],
+      toolData: [],  // Initialize empty tool data array
       isStreaming: true,
       agentSlug,
     }
@@ -378,6 +481,19 @@ export default function ChatPage() {
                   tool.status = 'complete'
                   tool.result = result
                 }
+              }
+              return updated
+            })
+          },
+          
+          onToolData: (toolData) => {
+            // Add structured tool data for UI rendering
+            setMessages(prev => {
+              const updated = [...prev]
+              const lastMsg = updated[updated.length - 1]
+              if (lastMsg.role === 'assistant') {
+                lastMsg.toolData = lastMsg.toolData || []
+                lastMsg.toolData.push(toolData)
               }
               return updated
             })

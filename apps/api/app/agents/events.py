@@ -89,6 +89,7 @@ class EventType(str, Enum):
     # Tool execution
     TOOL_START = "tool_start"
     TOOL_END = "tool_end"
+    TOOL_DATA = "tool_data"  # Full structured tool results for frontend rendering
     
     # Agent delegation
     DELEGATE = "delegate"
@@ -229,6 +230,35 @@ class AgentEvent:
     def tool_end(cls, tool_name: str, result: Any = None) -> "AgentEvent":
         """Create event for tool execution completing."""
         return cls(type=EventType.TOOL_END, tool_name=tool_name, tool_result=result)
+    
+    @classmethod
+    def tool_data(
+        cls, 
+        tool_name: str, 
+        data: Dict[str, Any],
+        tool_category: Optional[str] = None
+    ) -> "AgentEvent":
+        """
+        Create event with full structured tool data for frontend rendering.
+        
+        This event carries the complete tool result without truncation,
+        allowing the frontend to render rich UI components based on
+        the structured data.
+        
+        Args:
+            tool_name: Name of the tool that produced this data
+            data: Full structured result from the tool
+            tool_category: Optional category (e.g., 'seo', 'analytics')
+            
+        Returns:
+            AgentEvent with TOOL_DATA type
+        """
+        return cls(
+            type=EventType.TOOL_DATA,
+            tool_name=tool_name,
+            tool_result=data,
+            metadata={"category": tool_category} if tool_category else {}
+        )
     
     @classmethod
     def delegate(cls, to_agent: str, task: str, from_agent: Optional[str] = None) -> "AgentEvent":
