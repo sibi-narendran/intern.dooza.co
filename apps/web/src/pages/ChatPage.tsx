@@ -570,11 +570,17 @@ export default function ChatPage() {
       content: msg.content,
       timestamp: new Date(msg.created_at),
       // Reconstruct tool calls from summary (limited data, but enough for display)
+      // Expand compressed field names back to original format for ToolIndicator
       toolCalls: msg.tool_calls_summary?.map(tc => ({
         name: tc.name,
         args: tc.args,
         status: (tc.status || 'complete') as 'pending' | 'running' | 'complete' | 'error',
-        result: tc.summary ? tc.summary : undefined,
+        result: tc.summary ? {
+          // Expand compressed -> original field names
+          overall_score: tc.summary.score,
+          issues_count: tc.summary.issueCount,
+          success: tc.summary.success,
+        } : undefined,
       })),
       isStreaming: false,
     }))
