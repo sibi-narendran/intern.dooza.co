@@ -8,14 +8,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
-  ArrowLeft, 
+  ArrowLeft,
   Send, 
   Loader2, 
   CheckCircle2,
   AlertCircle,
   Bot,
-  User,
-  Sparkles
+  User
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getAgentDetails, GalleryAgent } from '../lib/agent-api'
@@ -36,6 +35,8 @@ import ChatHistoryDropdown from '../components/ChatHistoryDropdown'
 import MarkdownRenderer from '../components/MarkdownRenderer'
 import { DynamicToolRenderer } from '../components/tools'
 import { ToolUISchema, formatSummary } from '../types/tool-ui'
+import WelcomeScreen from '../components/WelcomeScreen'
+import { formatToolName } from '../config/tool-display-names'
 
 // ============================================================================
 // Types
@@ -64,19 +65,6 @@ interface ChatMessage extends Message {
 // ============================================================================
 // Components
 // ============================================================================
-
-/** Format tool names for user-friendly display */
-function formatToolNameForUser(name: string): string {
-  const mapping: Record<string, string> = {
-    'seo_analyze_url': 'Analyzing URL',
-    'seo_audit_meta_tags': 'Checking meta tags',
-    'seo_analyze_headings': 'Analyzing headings',
-    'seo_check_images': 'Checking images',
-    'seo_extract_keywords': 'Extracting keywords',
-  }
-  // Use mapping if available, otherwise format the name nicely
-  return mapping[name] || name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
 
 /** 
  * User-friendly tool indicator with expandable results.
@@ -123,7 +111,7 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
   
   const url = tool.args?.url as string | undefined
   const resultSummary = getResultSummary()
-  const friendlyName = formatToolNameForUser(tool.name)
+  const friendlyName = formatToolName(tool.name)
   
   return (
     <div style={{
@@ -587,24 +575,26 @@ export default function ChatPage() {
   }, [])
   
   // Load agent info and most recent conversation
+  // Optimized: Run independent API calls in parallel, defer non-critical work
   useEffect(() => {
     async function loadAgentAndRecentChat() {
       if (!agentSlug) return
       
       setLoading(true)
       try {
-        // Load agent details
-        const agentData = await getAgentDetails(agentSlug)
+        // Parallel fetch: agent details + most recent thread
+        // These are independent and can run simultaneously
+        const [agentData, { threads }] = await Promise.all([
+          getAgentDetails(agentSlug),
+          listThreads(agentSlug, 1, 0),
+        ])
+        
         setAgent(agentData)
         
-        // Flush retry queue on load
-        await flushRetryQueue()
+        // Show UI immediately after critical data loads
+        setLoading(false)
         
-        // Check for pending messages in retry queue
-        setPendingCount(getQueuedMessageCount())
-        
-        // Load most recent thread (resume where user left off)
-        const { threads } = await listThreads(agentSlug, 1, 0)
+        // Load thread messages if we have a recent conversation
         if (threads.length > 0) {
           const mostRecent = threads[0]
           setThreadId(mostRecent.thread_id)
@@ -624,9 +614,16 @@ export default function ChatPage() {
           }
         }
         
+        // Defer non-critical work: flush retry queue in background
+        // This doesn't block UI and can happen asynchronously
+        flushRetryQueue().then(() => {
+          setPendingCount(getQueuedMessageCount())
+        }).catch(err => {
+          console.warn('Retry queue flush failed:', err)
+        })
+        
       } catch (err) {
         console.error('Failed to load agent:', err)
-      } finally {
         setLoading(false)
       }
     }
@@ -998,14 +995,7 @@ export default function ChatPage() {
   // Loading state
   if (loading) {
     return (
-      <div style={{
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'column',
-        gap: '12px',
-      }}>
+      <div className="chat-page chat-page--loading">
         <Loader2 size={32} className="animate-spin" style={{ color: 'var(--primary-600)' }} />
         <span style={{ color: 'var(--gray-500)', fontSize: '14px' }}>
           Loading conversation...
@@ -1015,108 +1005,58 @@ export default function ChatPage() {
   }
   
   return (
-    <div style={{
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      background: 'var(--gray-50)',
-    }}>
-      {/* Header */}
-      <header style={{
-        padding: '12px 20px',
-        background: 'white',
-        borderBottom: '1px solid var(--gray-200)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '16px',
-      }}>
+    <div className="chat-page">
+      {/* Chat header - agent info and controls */}
+      <div className="chat-page__header">
         <button
           onClick={() => navigate('/')}
+          className="chat-page__back-btn"
           title="Back to Dashboard"
-          style={{
-            background: 'none',
-            border: 'none',
-            padding: '8px',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            color: 'var(--gray-600)',
-            display: 'flex',
-            alignItems: 'center',
-          }}
         >
           <ArrowLeft size={20} />
         </button>
         
         {agent && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              background: agent.gradient || 'var(--primary-600)',
-              overflow: 'hidden',
-            }}>
+          <div className="chat-page__agent-info">
+            <div 
+              className="chat-page__agent-avatar"
+              style={{ background: agent.gradient || 'var(--primary-600)' }}
+            >
               {agent.avatar_url && (
-                <img 
-                  src={agent.avatar_url} 
-                  alt={agent.name}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
+                <img src={agent.avatar_url} alt={agent.name} />
               )}
             </div>
             <div>
-              <h1 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>
-                {agent.name}
-              </h1>
-              <p style={{ fontSize: '13px', color: 'var(--gray-500)', margin: 0 }}>
-                {agent.role}
-              </p>
+              <h1 className="chat-page__agent-name">{agent.name}</h1>
+              <p className="chat-page__agent-role">{agent.role}</p>
             </div>
           </div>
         )}
         
-        {/* Pending messages indicator */}
-        {pendingCount > 0 && (
-          <div 
-            title={`${pendingCount} message(s) pending sync`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '4px 8px',
-              borderRadius: '12px',
-              background: '#fef3c7',
-              color: '#d97706',
-              fontSize: '11px',
-              fontWeight: 500,
-            }}
-          >
-            <AlertCircle size={12} />
-            {pendingCount} pending
-          </div>
-        )}
-        
-        {/* History dropdown and New Chat button */}
-        {agentSlug && (
-          <ChatHistoryDropdown
-            agentSlug={agentSlug}
-            currentThreadId={threadId}
-            onSelectThread={handleSelectThread}
-            onNewChat={handleNewChat}
-            disabled={isStreaming}
-          />
-        )}
-      </header>
+        <div className="chat-page__controls">
+          {/* Pending messages indicator */}
+          {pendingCount > 0 && (
+            <div className="chat-page__pending" title={`${pendingCount} message(s) pending sync`}>
+              <AlertCircle size={12} />
+              {pendingCount} pending
+            </div>
+          )}
+          
+          {/* History dropdown and New Chat button */}
+          {agentSlug && (
+            <ChatHistoryDropdown
+              agentSlug={agentSlug}
+              currentThreadId={threadId}
+              onSelectThread={handleSelectThread}
+              onNewChat={handleNewChat}
+              disabled={isStreaming}
+            />
+          )}
+        </div>
+      </div>
       
       {/* Messages */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-      }}>
+      <div className="chat-page__messages">
         {/* Loading messages indicator */}
         {loadingMessages && (
           <div style={{
@@ -1133,38 +1073,14 @@ export default function ChatPage() {
         )}
         
         {messages.length === 0 && !loadingMessages && (
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--gray-500)',
-            textAlign: 'center',
-            padding: '40px',
-          }}>
-            <div style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '16px',
-              background: agent?.gradient || 'linear-gradient(135deg, #8b5cf6, #a78bfa)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '16px',
-            }}>
-              <Sparkles size={28} color="white" />
-            </div>
-            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gray-800)', marginBottom: '8px' }}>
-              Chat with {agent?.name || 'Agent'}
-            </h2>
-            <p style={{ maxWidth: '400px', lineHeight: 1.5 }}>
-              {agent?.slug === 'seomi' 
-                ? "Enter a website URL and I'll analyze it for SEO improvements. For example: \"Analyze tmrgsolutions.com\""
-                : `Ask ${agent?.name || 'me'} anything to get started.`
-              }
-            </p>
-          </div>
+          <WelcomeScreen 
+            agent={agent} 
+            onSuggestionClick={(prompt) => {
+              setInput(prompt)
+              // Focus input after setting the prompt
+              setTimeout(() => inputRef.current?.focus(), 0)
+            }}
+          />
         )}
         
         {messages.map(message => (
@@ -1180,76 +1096,29 @@ export default function ChatPage() {
       
       {/* Error banner */}
       {error && (
-        <div style={{
-          padding: '12px 20px',
-          background: '#fef2f2',
-          borderTop: '1px solid #fecaca',
-          color: '#dc2626',
-          fontSize: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}>
+        <div className="chat-page__error">
           <AlertCircle size={16} />
           {error}
         </div>
       )}
       
-      {/* Input */}
-      <div style={{
-        padding: '16px 20px',
-        background: 'white',
-        borderTop: '1px solid var(--gray-200)',
-      }}>
-        <div style={{
-          display: 'flex',
-          gap: '12px',
-          alignItems: 'flex-end',
-          maxWidth: '800px',
-          margin: '0 auto',
-        }}>
+      {/* Input - ChatGPT style */}
+      <div className="chat-page__input-container">
+        <div className="chat-page__input-wrapper">
           <textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={
-              agent?.slug === 'seomi'
-                ? "Enter a URL to analyze (e.g., example.com)"
-                : "Type your message..."
-            }
+            placeholder="What's on your mind today?"
             disabled={isStreaming}
             rows={1}
-            style={{
-              flex: 1,
-              padding: '12px 16px',
-              borderRadius: '12px',
-              border: '1px solid var(--gray-300)',
-              fontSize: '15px',
-              resize: 'none',
-              fontFamily: 'inherit',
-              outline: 'none',
-              minHeight: '48px',
-              maxHeight: '120px',
-            }}
+            className="chat-page__textarea"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
-            style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '12px',
-              border: 'none',
-              background: 'var(--primary-600)',
-              color: 'white',
-              cursor: input.trim() && !isStreaming ? 'pointer' : 'not-allowed',
-              opacity: input.trim() && !isStreaming ? 1 : 0.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-            }}
+            className="chat-page__send-btn"
           >
             {isStreaming ? (
               <Loader2 size={20} className="animate-spin" />

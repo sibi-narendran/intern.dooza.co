@@ -1,9 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check, Calendar, ExternalLink, Plug } from 'lucide-react';
+import { X, Check, Plug } from 'lucide-react';
 import { agents } from '../data/agents';
-
-const CAL_LINK = 'https://cal.com/sibinarendran/demo';
 
 const AgentModalContext = createContext(null);
 
@@ -264,41 +262,6 @@ const AgentModal = ({ agent, onClose }) => {
                         </ul>
                     </div>
                     
-                    {/* Book Meeting CTA */}
-                    <a
-                        href={CAL_LINK}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '14px 24px',
-                            background: 'var(--primary-600)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '12px',
-                            fontSize: '15px',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            textDecoration: 'none',
-                            transition: 'all 0.2s'
-                        }}
-                        onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'var(--primary-700)';
-                            e.currentTarget.style.transform = 'translateY(-1px)';
-                        }}
-                        onMouseLeave={(e) => {
-                            e.currentTarget.style.background = 'var(--primary-600)';
-                            e.currentTarget.style.transform = 'translateY(0)';
-                        }}
-                    >
-                        <Calendar size={18} />
-                        Book a Setup Meeting
-                        <ExternalLink size={14} style={{ opacity: 0.7 }} />
-                    </a>
                 </div>
             </div>
             

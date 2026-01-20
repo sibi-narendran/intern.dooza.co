@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { LogOut, Settings, ExternalLink, Building2, User } from 'lucide-react'
+import { LogOut, Settings, ExternalLink, Building2, User, ChevronUp } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const UserMenu = () => {
@@ -74,85 +74,93 @@ const UserMenu = () => {
   }
 
   return (
-    <div className="profile-menu" ref={menuRef}>
+    <div className="sidebar-user" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`profile-menu__trigger ${isOpen ? 'profile-menu__trigger--active' : ''}`}
+        className={`sidebar-user__trigger ${isOpen ? 'sidebar-user__trigger--active' : ''}`}
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label="Profile menu"
       >
-        <div className="profile-menu__avatar-wrapper">
+        <div className="sidebar-user__avatar">
           {getAvatarUrl() ? (
-            <img src={getAvatarUrl()!} alt="" className="profile-menu__avatar" />
+            <img src={getAvatarUrl()!} alt="" />
           ) : (
-            <div className="profile-menu__avatar profile-menu__avatar--initials">
+            <span className="sidebar-user__avatar-initials">
               {getInitials()}
-            </div>
+            </span>
           )}
-          <span className="profile-menu__status" />
+          <span className="sidebar-user__status" />
         </div>
+        <div className="sidebar-user__info">
+          <span className="sidebar-user__name">{getUserDisplayName()}</span>
+          {currentOrg && (
+            <span className="sidebar-user__org">{currentOrg.name}</span>
+          )}
+        </div>
+        <ChevronUp 
+          size={18} 
+          className={`sidebar-user__chevron ${isOpen ? 'sidebar-user__chevron--open' : ''}`} 
+        />
       </button>
 
       {isOpen && (
         <>
-          <div className="profile-menu__backdrop" onClick={closeMenu} />
-          <div className="profile-menu__dropdown" role="menu">
-            <div className="profile-menu__header">
-              <div className="profile-menu__header-avatar">
+          <div className="sidebar-user__backdrop" onClick={closeMenu} />
+          <div className="sidebar-user__dropdown" role="menu">
+            <div className="sidebar-user__dropdown-header">
+              <div className="sidebar-user__dropdown-avatar">
                 {getAvatarUrl() ? (
                   <img src={getAvatarUrl()!} alt="" />
                 ) : (
-                  <div className="profile-menu__header-avatar-initials">
-                    {getInitials()}
-                  </div>
+                  <span>{getInitials()}</span>
                 )}
               </div>
-              <div className="profile-menu__header-info">
-                <div className="profile-menu__header-name">{getUserDisplayName()}</div>
-                <div className="profile-menu__header-email">{getUserEmail()}</div>
+              <div className="sidebar-user__dropdown-info">
+                <span className="sidebar-user__dropdown-name">{getUserDisplayName()}</span>
+                <span className="sidebar-user__dropdown-email">{getUserEmail()}</span>
               </div>
             </div>
 
             {currentOrg && (
-              <div className="profile-menu__org-section">
-                <Building2 size={14} />
+              <div className="sidebar-user__dropdown-org">
+                <Building2 size={16} />
                 <span>{currentOrg.name}</span>
               </div>
             )}
 
-            <div className="profile-menu__divider" />
+            <div className="sidebar-user__divider" />
 
-            <div className="profile-menu__items" role="group">
+            <div className="sidebar-user__menu-items" role="group">
               <button 
                 onClick={handleAccountSettings} 
-                className="profile-menu__item"
+                className="sidebar-user__menu-item"
                 role="menuitem"
               >
-                <User size={16} />
+                <User size={18} />
                 <span>My Profile</span>
               </button>
 
               <button 
                 onClick={handleAccountSettings} 
-                className="profile-menu__item"
+                className="sidebar-user__menu-item"
                 role="menuitem"
               >
-                <Settings size={16} />
+                <Settings size={18} />
                 <span>Account Settings</span>
-                <ExternalLink size={12} className="profile-menu__item-external" />
+                <ExternalLink size={14} className="sidebar-user__external-icon" />
               </button>
             </div>
 
-            <div className="profile-menu__divider" />
+            <div className="sidebar-user__divider" />
 
-            <div className="profile-menu__items" role="group">
+            <div className="sidebar-user__menu-items" role="group">
               <button 
                 onClick={handleLogout} 
-                className="profile-menu__item profile-menu__item--danger"
+                className="sidebar-user__menu-item sidebar-user__menu-item--danger"
                 role="menuitem"
               >
-                <LogOut size={16} />
+                <LogOut size={18} />
                 <span>Sign Out</span>
               </button>
             </div>

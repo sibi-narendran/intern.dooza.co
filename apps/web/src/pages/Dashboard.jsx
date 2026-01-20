@@ -287,7 +287,10 @@ const Dashboard = () => {
                                     color: 'var(--primary-600)',
                                     fontWeight: '500'
                                 }}>
-                                    Click to see what {agent.name} can do →
+                                    {agent.chat_enabled 
+                                        ? `Chat with ${agent.name} →`
+                                        : `See what ${agent.name} can do →`
+                                    }
                                 </span>
                             </div>
                         </div>

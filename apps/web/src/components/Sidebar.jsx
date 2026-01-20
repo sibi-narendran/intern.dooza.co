@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { LayoutGrid, Puzzle, Brain, Users } from 'lucide-react';
 import logo from '../assets/logo.png';
+import UserMenu from './UserMenu';
 
 const Sidebar = () => {
     const location = useLocation();
@@ -101,6 +102,11 @@ const Sidebar = () => {
                     <span>Workforce Gallery</span>
                 </Link>
             </nav>
+
+            {/* User Menu - auto pushed to bottom via CSS margin-top: auto */}
+            <div className="sidebar__user-section">
+                <UserMenu />
+            </div>
         </aside>
     );
 };
