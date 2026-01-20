@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Brain, Plus, Building2, User, FileText, Folder, Search } from 'lucide-react'
+import { Brain, Plus, FileText, Folder, Search } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { 
-  getOrgKnowledgeBases, 
   getUserKnowledgeBases,
   type KnowledgeBase 
 } from '../lib/api'
@@ -15,11 +14,8 @@ const KB_TYPE_CONFIG = {
   custom: { label: 'Custom', color: '#7c3aed', bg: '#f5f3ff' },
 }
 
-type TabType = 'organization' | 'personal'
-
 export default function KnowledgeBasePage() {
-  const { user, currentOrg } = useAuth()
-  const [activeTab, setActiveTab] = useState<TabType>('organization')
+  const { user } = useAuth()
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -31,10 +27,7 @@ export default function KnowledgeBasePage() {
       setLoading(true)
 
       try {
-        const result = activeTab === 'organization' && currentOrg
-          ? await getOrgKnowledgeBases(currentOrg.id)
-          : await getUserKnowledgeBases(user.id)
-
+        const result = await getUserKnowledgeBases(user.id)
         setKnowledgeBases(result.data || [])
       } catch {
         setKnowledgeBases([])
@@ -44,7 +37,7 @@ export default function KnowledgeBasePage() {
     }
 
     loadKnowledgeBases()
-  }, [user, currentOrg, activeTab])
+  }, [user])
 
   const filteredKBs = knowledgeBases.filter(kb =>
     kb.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -74,60 +67,6 @@ export default function KnowledgeBasePage() {
         <p style={{ fontSize: '15px', color: 'var(--gray-600)', marginTop: '8px', maxWidth: '600px' }}>
           Store information that your AI agents can access for accurate, context-aware responses.
         </p>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '4px', 
-        marginBottom: '24px',
-        background: 'var(--gray-100)',
-        padding: '4px',
-        borderRadius: '10px',
-        width: 'fit-content'
-      }}>
-        <button
-          onClick={() => setActiveTab('organization')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 16px',
-            borderRadius: '8px',
-            border: 'none',
-            background: activeTab === 'organization' ? 'white' : 'transparent',
-            color: activeTab === 'organization' ? 'var(--gray-900)' : 'var(--gray-600)',
-            fontWeight: activeTab === 'organization' ? '600' : '500',
-            fontSize: '14px',
-            cursor: 'pointer',
-            boxShadow: activeTab === 'organization' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            transition: 'all 0.15s'
-          }}
-        >
-          <Building2 size={16} />
-          {currentOrg?.name || 'Organization'}
-        </button>
-        <button
-          onClick={() => setActiveTab('personal')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 16px',
-            borderRadius: '8px',
-            border: 'none',
-            background: activeTab === 'personal' ? 'white' : 'transparent',
-            color: activeTab === 'personal' ? 'var(--gray-900)' : 'var(--gray-600)',
-            fontWeight: activeTab === 'personal' ? '600' : '500',
-            fontSize: '14px',
-            cursor: 'pointer',
-            boxShadow: activeTab === 'personal' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            transition: 'all 0.15s'
-          }}
-        >
-          <User size={16} />
-          Personal
-        </button>
       </div>
 
       {/* Search and Actions */}

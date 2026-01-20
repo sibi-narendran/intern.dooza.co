@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Puzzle, Plus, Building2, User, Check, Loader2, AlertCircle, Unplug, Search, X } from 'lucide-react'
+import { Puzzle, Plus, Check, Loader2, AlertCircle, Unplug, Search, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { 
   getAvailableApps,
@@ -8,8 +8,7 @@ import {
   disconnectIntegration,
   getIntegrationStatus,
   type ComposioApp,
-  type ComposioConnection,
-  type ConnectionScope
+  type ComposioConnection
 } from '../lib/api'
 
 // App icons mapping - fallback emojis for common apps
@@ -98,11 +97,8 @@ function IntegrationSkeleton() {
   )
 }
 
-type TabType = 'organization' | 'personal'
-
 export default function IntegrationsPage() {
-  const { user, currentOrg } = useAuth()
-  const [activeTab, setActiveTab] = useState<TabType>('organization')
+  const { user } = useAuth()
   const [apps, setApps] = useState<ComposioApp[]>([])
   const [connections, setConnections] = useState<ComposioConnection[]>([])
   const [loading, setLoading] = useState(true)
@@ -112,9 +108,6 @@ export default function IntegrationsPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [showAll, setShowAll] = useState(false)
-
-  const scope: ConnectionScope = activeTab === 'organization' ? 'organization' : 'personal'
-  const orgId = activeTab === 'organization' ? currentOrg?.id : undefined
 
   // Load apps once (they don't change)
   useEffect(() => {
@@ -129,7 +122,7 @@ export default function IntegrationsPage() {
     loadApps()
   }, [])
 
-  // Load connections when tab changes
+  // Load personal connections
   const loadConnections = useCallback(async () => {
     if (!user) return
     
@@ -137,7 +130,7 @@ export default function IntegrationsPage() {
     setError(null)
 
     try {
-      const connectionsData = await getConnections(scope, orgId)
+      const connectionsData = await getConnections('personal')
       setConnections(connectionsData)
     } catch (err) {
       console.error('Failed to load connections:', err)
@@ -145,7 +138,7 @@ export default function IntegrationsPage() {
     } finally {
       setLoading(false)
     }
-  }, [user, scope, orgId])
+  }, [user])
 
   useEffect(() => {
     loadConnections()
@@ -167,11 +160,32 @@ export default function IntegrationsPage() {
     try {
       const result = await initiateConnection(
         appKey,
-        scope,
-        orgId,
+        'personal',
+        undefined,
         `${window.location.origin}/integrations?connection_status=success`
       )
-      window.open(result.redirect_url, '_blank', 'width=600,height=700')
+      
+      if (!result.redirect_url) {
+        throw new Error('No redirect URL received. The integration may need configuration.')
+      }
+      
+      const popup = window.open(
+        result.redirect_url, 
+        `connect_${appKey}`,
+        'width=600,height=700,scrollbars=yes,resizable=yes'
+      )
+      
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        setError('Popup was blocked. Please enable popups for this site.')
+      } else {
+        const checkPopup = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkPopup)
+            loadConnections()
+          }
+        }, 1000)
+        setTimeout(() => clearInterval(checkPopup), 5 * 60 * 1000)
+      }
     } catch (err) {
       console.error('Failed to initiate connection:', err)
       setError(err instanceof Error ? err.message : 'Failed to connect. Please try again.')
@@ -309,75 +323,14 @@ export default function IntegrationsPage() {
             onClick={() => setError(null)}
             style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b' }}
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
       )}
 
-      {/* Search + Tabs Row */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'space-between',
-        gap: '16px',
-        marginBottom: '24px',
-        flexWrap: 'wrap'
-      }}>
-        {/* Tabs */}
-        <div style={{ 
-          display: 'flex', 
-          gap: '4px', 
-          background: 'var(--gray-100)',
-          padding: '4px',
-          borderRadius: '10px',
-          width: 'fit-content'
-        }}>
-          <button
-            onClick={() => setActiveTab('organization')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeTab === 'organization' ? 'white' : 'transparent',
-              color: activeTab === 'organization' ? 'var(--gray-900)' : 'var(--gray-600)',
-              fontWeight: activeTab === 'organization' ? '600' : '500',
-              fontSize: '14px',
-              cursor: 'pointer',
-              boxShadow: activeTab === 'organization' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-              transition: 'all 0.15s'
-            }}
-          >
-            <Building2 size={16} />
-            {currentOrg?.name || 'Organization'}
-          </button>
-          <button
-            onClick={() => setActiveTab('personal')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeTab === 'personal' ? 'white' : 'transparent',
-              color: activeTab === 'personal' ? 'var(--gray-900)' : 'var(--gray-600)',
-              fontWeight: activeTab === 'personal' ? '600' : '500',
-              fontSize: '14px',
-              cursor: 'pointer',
-              boxShadow: activeTab === 'personal' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-              transition: 'all 0.15s'
-            }}
-          >
-            <User size={16} />
-            Personal
-          </button>
-        </div>
-
-        {/* Search */}
-        <div style={{ position: 'relative', minWidth: '280px' }}>
+      {/* Search */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ position: 'relative', maxWidth: '400px' }}>
           <Search 
             size={18} 
             style={{ 
@@ -432,14 +385,6 @@ export default function IntegrationsPage() {
           )}
         </div>
       </div>
-
-      {/* Scope Description */}
-      <p style={{ fontSize: '13px', color: 'var(--gray-500)', marginBottom: '24px' }}>
-        {activeTab === 'organization' 
-          ? 'Organization integrations are shared with all team members.'
-          : 'Personal integrations are only accessible by you.'
-        }
-      </p>
 
       {/* Loading Skeletons */}
       {loading && (

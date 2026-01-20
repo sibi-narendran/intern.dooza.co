@@ -17,7 +17,7 @@ type TabType = 'organization' | 'public'
 
 export default function WorkforceGalleryPage() {
   const { currentOrg } = useAuth()
-  const [activeTab, setActiveTab] = useState<TabType>('organization')
+  const [activeTab, setActiveTab] = useState<TabType>('public')
   const [searchQuery, setSearchQuery] = useState('')
   
   // Data states
