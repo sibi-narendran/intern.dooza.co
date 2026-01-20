@@ -15,8 +15,7 @@ import {
   AlertCircle,
   Bot,
   User,
-  Sparkles,
-  Trash2
+  Sparkles
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getAgentDetails, GalleryAgent } from '../lib/agent-api'
@@ -25,8 +24,15 @@ import {
   generateMessageId, 
   Message,
   ToolCall,
-  ToolData
+  ToolData,
+  saveMessage,
+  loadThreadMessages,
+  listThreads,
+  flushRetryQueue,
+  type SavedMessage,
 } from '../lib/chat-api'
+import { getQueuedMessageCount } from '../lib/persistence'
+import ChatHistoryDropdown from '../components/ChatHistoryDropdown'
 import MarkdownRenderer from '../components/MarkdownRenderer'
 import { SEOAnalysisCard } from '../components/seo'
 import { SEOAnalysisResult, isSEOAnalysisResult } from '../types/seo'
@@ -505,6 +511,21 @@ function MessageBubble({
             ) : null}
             
             {/* Note: SEO cards now rendered inside ToolIndicator for cleaner UX */}
+            
+            {/* Streaming indicator - shows while stream is in progress and content exists */}
+            {message.isStreaming && !isWorking && (
+              <div style={{ 
+                display: 'flex', 
+                gap: '4px', 
+                marginTop: '12px',
+                paddingTop: '8px',
+                borderTop: '1px solid var(--gray-100)',
+              }}>
+                <span className="working-dot" style={{ animationDelay: '0ms' }} />
+                <span className="working-dot" style={{ animationDelay: '150ms' }} />
+                <span className="working-dot" style={{ animationDelay: '300ms' }} />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -524,27 +545,19 @@ export default function ChatPage() {
   // Agent info
   const [agent, setAgent] = useState<GalleryAgent | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMessages, setLoadingMessages] = useState(false)
   
-  // Chat state - persist thread ID in localStorage
+  // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
-  // Thread ID - load from localStorage on mount
-  const getStorageKey = (slug: string) => `dooza_chat_${slug}`
-  const [threadId, setThreadId] = useState<string | null>(() => {
-    if (agentSlug) {
-      const stored = localStorage.getItem(getStorageKey(agentSlug))
-      if (stored) {
-        try {
-          const data = JSON.parse(stored)
-          return data.threadId || null
-        } catch { return null }
-      }
-    }
-    return null
-  })
+  // Retry queue indicator
+  const [pendingCount, setPendingCount] = useState(0)
+  
+  // Thread ID - always start fresh (cross-device via History dropdown)
+  const [threadId, setThreadId] = useState<string | null>(null)
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -559,28 +572,62 @@ export default function ChatPage() {
     scrollToBottom()
   }, [messages, scrollToBottom])
   
-  // Load agent info
+  // Transform saved messages to ChatMessage format
+  const transformSavedMessages = useCallback((savedMessages: SavedMessage[]): ChatMessage[] => {
+    return savedMessages.map(msg => ({
+      id: msg.id,
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+      timestamp: new Date(msg.created_at),
+      // Reconstruct tool calls from summary (limited data, but enough for display)
+      toolCalls: msg.tool_calls_summary?.map(tc => ({
+        name: tc.name,
+        args: tc.args,
+        status: (tc.status || 'complete') as 'complete' | 'error',
+        result: tc.summary ? tc.summary : undefined,
+      })),
+      isStreaming: false,
+    }))
+  }, [])
+  
+  // Load agent info and most recent conversation
   useEffect(() => {
-    async function loadAgent() {
+    async function loadAgentAndRecentChat() {
       if (!agentSlug) return
       
       setLoading(true)
       try {
+        // Load agent details
         const agentData = await getAgentDetails(agentSlug)
         setAgent(agentData)
         
-        // Check localStorage for existing threadId (for conversation continuity)
-        const stored = localStorage.getItem(getStorageKey(agentSlug))
-        if (stored) {
+        // Flush retry queue on load
+        await flushRetryQueue()
+        
+        // Check for pending messages in retry queue
+        setPendingCount(getQueuedMessageCount())
+        
+        // Load most recent thread (resume where user left off)
+        const { threads } = await listThreads(agentSlug, 1, 0)
+        if (threads.length > 0) {
+          const mostRecent = threads[0]
+          setThreadId(mostRecent.thread_id)
+          setLoadingMessages(true)
+          
           try {
-            const data = JSON.parse(stored)
-            if (data.threadId) {
-              setThreadId(data.threadId)
+            const savedMessages = await loadThreadMessages(mostRecent.thread_id)
+            if (savedMessages.length > 0) {
+              const chatMessages = transformSavedMessages(savedMessages)
+              setMessages(chatMessages)
             }
-          } catch (e) {
-            console.error('Failed to parse stored data:', e)
+          } catch (msgErr) {
+            console.error('Failed to load messages:', msgErr)
+            // Don't show error - just start fresh
+          } finally {
+            setLoadingMessages(false)
           }
         }
+        
       } catch (err) {
         console.error('Failed to load agent:', err)
       } finally {
@@ -588,20 +635,23 @@ export default function ChatPage() {
       }
     }
     
-    loadAgent()
+    loadAgentAndRecentChat()
     document.title = `Chat with ${agentSlug} | Dooza`
-  }, [agentSlug])
+  }, [agentSlug, transformSavedMessages])
   
-  // Save threadId to localStorage (for quick lookup on next load)
+  // Update pending count periodically
   useEffect(() => {
-    if (agentSlug && threadId) {
-      localStorage.setItem(getStorageKey(agentSlug), JSON.stringify({ threadId }))
-    }
-  }, [threadId, agentSlug])
+    const interval = setInterval(() => {
+      setPendingCount(getQueuedMessageCount())
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
   
   // Handle send message
   const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming || !agentSlug) return
+    
+    const currentThreadId = threadId || `thread_${Date.now()}`
     
     const userMessage: ChatMessage = {
       id: generateMessageId(),
@@ -629,12 +679,25 @@ export default function ChatPage() {
     setIsStreaming(true)
     setError(null)
     
+    // Save user message to backend (async, non-blocking)
+    saveMessage({
+      threadId: currentThreadId,
+      agentSlug,
+      role: 'user',
+      content: userMessage.content,
+    }).catch(err => console.warn('Failed to save user message:', err))
+    
+    // Track assistant message for saving on completion
+    let finalAssistantContent = ''
+    let finalToolCalls: ToolCall[] = []
+    
     try {
       const result = await streamChat(
         agentSlug,
         userMessage.content,
         {
           onToken: (content, agent) => {
+            finalAssistantContent += content
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               
@@ -670,10 +733,12 @@ export default function ChatPage() {
           },
           
           onToolStart: (toolName, args) => {
+            const newTool = { name: toolName, args, status: 'running' as const }
+            finalToolCalls.push(newTool)
+            
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               
-              const newTool = { name: toolName, args, status: 'running' as const }
               const segments = msg.segments || []
               
               // Find the specialist - use multiple fallbacks for robustness
@@ -719,6 +784,13 @@ export default function ChatPage() {
           },
           
           onToolEnd: (toolName, result) => {
+            // Update tracked tool calls
+            finalToolCalls = finalToolCalls.map(t => 
+              t.name === toolName && t.status === 'running'
+                ? { ...t, status: 'complete' as const, result }
+                : t
+            )
+            
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               
@@ -826,11 +898,29 @@ export default function ChatPage() {
             ))
           },
         },
-        threadId || undefined
+        currentThreadId
       )
+      
+      // Ensure streaming flag is cleared (fallback if onEnd callback didn't fire)
+      setMessages(prev => prev.map((msg, idx) => 
+        idx === prev.length - 1 && msg.role === 'assistant'
+          ? { ...msg, isStreaming: false }
+          : msg
+      ))
       
       if (result.threadId) {
         setThreadId(result.threadId)
+        
+        // Save assistant message to backend after streaming completes
+        if (finalAssistantContent) {
+          saveMessage({
+            threadId: result.threadId,
+            agentSlug,
+            role: 'assistant',
+            content: finalAssistantContent,
+            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+          }).catch(err => console.warn('Failed to save assistant message:', err))
+        }
       }
     } catch (err) {
       console.error('Chat error:', err)
@@ -848,15 +938,30 @@ export default function ChatPage() {
     }
   }
   
-  // Clear chat and start fresh
-  const handleClearChat = useCallback(() => {
-    if (agentSlug) {
-      localStorage.removeItem(getStorageKey(agentSlug))
+  // Select a thread from history
+  const handleSelectThread = useCallback(async (selectedThreadId: string) => {
+    setThreadId(selectedThreadId)
+    setLoadingMessages(true)
+    setError(null)
+    
+    try {
+      const savedMessages = await loadThreadMessages(selectedThreadId)
+      const chatMessages = transformSavedMessages(savedMessages)
+      setMessages(chatMessages)
+    } catch (err) {
+      console.error('Failed to load thread:', err)
+      setError('Failed to load conversation')
+    } finally {
+      setLoadingMessages(false)
     }
+  }, [transformSavedMessages])
+  
+  // Start a new chat (clear current state)
+  const handleNewChat = useCallback(() => {
     setMessages([])
     setThreadId(null)
     setError(null)
-  }, [agentSlug])
+  }, [])
   
   // Loading state
   if (loading) {
@@ -866,8 +971,13 @@ export default function ChatPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        flexDirection: 'column',
+        gap: '12px',
       }}>
         <Loader2 size={32} className="animate-spin" style={{ color: 'var(--primary-600)' }} />
+        <span style={{ color: 'var(--gray-500)', fontSize: '14px' }}>
+          Loading conversation...
+        </span>
       </div>
     )
   }
@@ -889,7 +999,8 @@ export default function ChatPage() {
         gap: '16px',
       }}>
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate('/')}
+          title="Back to Dashboard"
           style={{
             background: 'none',
             border: 'none',
@@ -932,29 +1043,36 @@ export default function ChatPage() {
           </div>
         )}
         
-        {/* New Chat button */}
-        {messages.length > 0 && (
-          <button
-            onClick={handleClearChat}
-            disabled={isStreaming}
-            title="Start new conversation"
+        {/* Pending messages indicator */}
+        {pendingCount > 0 && (
+          <div 
+            title={`${pendingCount} message(s) pending sync`}
             style={{
-              background: 'none',
-              border: '1px solid var(--gray-300)',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              cursor: isStreaming ? 'not-allowed' : 'pointer',
-              color: 'var(--gray-600)',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              fontSize: '13px',
-              opacity: isStreaming ? 0.5 : 1,
+              gap: '4px',
+              padding: '4px 8px',
+              borderRadius: '12px',
+              background: '#fef3c7',
+              color: '#d97706',
+              fontSize: '11px',
+              fontWeight: 500,
             }}
           >
-            <Trash2 size={16} />
-            New Chat
-          </button>
+            <AlertCircle size={12} />
+            {pendingCount} pending
+          </div>
+        )}
+        
+        {/* History dropdown and New Chat button */}
+        {agentSlug && (
+          <ChatHistoryDropdown
+            agentSlug={agentSlug}
+            currentThreadId={threadId}
+            onSelectThread={handleSelectThread}
+            onNewChat={handleNewChat}
+            disabled={isStreaming}
+          />
         )}
       </header>
       
@@ -967,7 +1085,22 @@ export default function ChatPage() {
         flexDirection: 'column',
         gap: '20px',
       }}>
-        {messages.length === 0 && (
+        {/* Loading messages indicator */}
+        {loadingMessages && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            gap: '8px',
+            color: 'var(--gray-500)',
+          }}>
+            <Loader2 size={16} className="animate-spin" />
+            <span style={{ fontSize: '14px' }}>Loading conversation history...</span>
+          </div>
+        )}
+        
+        {messages.length === 0 && !loadingMessages && (
           <div style={{
             flex: 1,
             display: 'flex',
@@ -1009,20 +1142,6 @@ export default function ChatPage() {
             agent={agent}
           />
         ))}
-        
-        {/* Typing indicator at bottom while streaming */}
-        {isStreaming && (
-          <div style={{ 
-            display: 'flex', 
-            gap: '4px', 
-            padding: '12px 20px',
-            marginLeft: '48px', 
-          }}>
-            <span className="working-dot" style={{ animationDelay: '0ms' }} />
-            <span className="working-dot" style={{ animationDelay: '150ms' }} />
-            <span className="working-dot" style={{ animationDelay: '300ms' }} />
-          </div>
-        )}
         
         <div ref={messagesEndRef} />
       </div>

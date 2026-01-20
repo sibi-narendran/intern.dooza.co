@@ -13,9 +13,19 @@
  * - Proper error recovery
  * - Connection cleanup
  * - Request timeouts
+ * - Message persistence with retry queue
  */
 
 import { supabase } from './supabase'
+import {
+  compressToolCalls,
+  queueMessageForRetry,
+  removeFromRetryQueue,
+  getMessagesToRetry,
+  markMessagesRetried,
+  clearRetryQueueForThread,
+  type ToolCallSummary,
+} from './persistence'
 
 // Configuration
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -380,3 +390,291 @@ export function formatAgentName(agentName: string): string {
     .map(word => word.toUpperCase() === 'SEO' ? 'SEO' : word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
+
+
+// ============================================================================
+// Message Persistence API
+// ============================================================================
+
+/**
+ * Response types from the messages API.
+ */
+export interface SavedMessage {
+  id: string
+  thread_id: string
+  role: 'user' | 'assistant'
+  content: string
+  tool_calls_summary?: ToolCallSummary[]
+  created_at: string
+}
+
+export interface ThreadSummary {
+  thread_id: string
+  agent_slug: string
+  title: string
+  last_message_preview: string
+  message_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SaveMessageRequest {
+  threadId: string
+  agentSlug: string
+  role: 'user' | 'assistant'
+  content: string
+  toolCalls?: ToolCall[]
+}
+
+/**
+ * Save a message to the backend.
+ * On failure, queues the message for retry.
+ * 
+ * @param message - The message to save
+ * @returns The saved message, or null if queued for retry
+ */
+export async function saveMessage(message: SaveMessageRequest): Promise<SavedMessage | null> {
+  const messageId = generateMessageId()
+  
+  try {
+    const token = await getAuthToken()
+    
+    // Compress tool calls if present
+    const toolCallsSummary = message.toolCalls 
+      ? compressToolCalls(message.toolCalls)
+      : undefined
+    
+    const response = await fetch(`${API_BASE}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        thread_id: message.threadId,
+        agent_slug: message.agentSlug,
+        role: message.role,
+        content: message.content,
+        tool_calls_summary: toolCallsSummary,
+      }),
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to save message: ${response.statusText}`)
+    }
+    
+    return await response.json()
+    
+  } catch (error) {
+    console.warn('Failed to save message, queuing for retry:', error)
+    
+    // Queue for retry
+    queueMessageForRetry({
+      id: messageId,
+      threadId: message.threadId,
+      agentSlug: message.agentSlug,
+      role: message.role,
+      content: message.content,
+      toolCallsSummary: message.toolCalls 
+        ? compressToolCalls(message.toolCalls)
+        : undefined,
+    })
+    
+    return null
+  }
+}
+
+/**
+ * Save a message without retry (fire and forget).
+ * Used for user messages where we don't want to block UI.
+ */
+export async function saveMessageAsync(message: SaveMessageRequest): Promise<void> {
+  saveMessage(message).catch(err => {
+    console.warn('Async message save failed:', err)
+  })
+}
+
+/**
+ * Load messages for a thread.
+ * Clears local retry queue for this thread after successful load.
+ * 
+ * Note: Global retry queue flush happens on page load (ChatPage),
+ * so we don't need to flush here.
+ * 
+ * @param threadId - The thread to load messages for
+ * @returns Array of messages in chronological order
+ */
+export async function loadThreadMessages(threadId: string): Promise<SavedMessage[]> {
+  try {
+    const token = await getAuthToken()
+    
+    const response = await fetch(
+      `${API_BASE}/v1/threads/${encodeURIComponent(threadId)}/messages?limit=500`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }
+    )
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return []  // Thread doesn't exist yet (new conversation)
+      }
+      throw new Error(`Failed to load messages: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    // Clear retry queue for this thread (messages loaded successfully)
+    clearRetryQueueForThread(threadId)
+    
+    return data.messages || []
+    
+  } catch (error) {
+    console.error('Failed to load thread messages:', error)
+    return []
+  }
+}
+
+/**
+ * List user's conversation threads.
+ * 
+ * @param agentSlug - Optional filter by agent
+ * @param limit - Max threads to return
+ * @param offset - Pagination offset
+ */
+export async function listThreads(
+  agentSlug?: string,
+  limit = 20,
+  offset = 0
+): Promise<{ threads: ThreadSummary[]; total: number; hasMore: boolean }> {
+  try {
+    const token = await getAuthToken()
+    
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+    })
+    if (agentSlug) {
+      params.set('agent_slug', agentSlug)
+    }
+    
+    const response = await fetch(
+      `${API_BASE}/v1/threads?${params.toString()}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }
+    )
+    
+    if (!response.ok) {
+      throw new Error(`Failed to list threads: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    
+    return {
+      threads: data.threads || [],
+      total: data.total || 0,
+      hasMore: data.has_more || false,
+    }
+    
+  } catch (error) {
+    console.error('Failed to list threads:', error)
+    return { threads: [], total: 0, hasMore: false }
+  }
+}
+
+/**
+ * Delete a conversation thread.
+ * 
+ * @param threadId - The thread to delete
+ */
+export async function deleteThread(threadId: string): Promise<boolean> {
+  try {
+    const token = await getAuthToken()
+    
+    const response = await fetch(
+      `${API_BASE}/v1/threads/${encodeURIComponent(threadId)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }
+    )
+    
+    if (!response.ok) {
+      throw new Error(`Failed to delete thread: ${response.statusText}`)
+    }
+    
+    // Also clear from retry queue
+    clearRetryQueueForThread(threadId)
+    
+    return true
+    
+  } catch (error) {
+    console.error('Failed to delete thread:', error)
+    return false
+  }
+}
+
+/**
+ * Flush the retry queue by batch saving pending messages.
+ * Called automatically on page load.
+ */
+export async function flushRetryQueue(): Promise<void> {
+  const messagesToRetry = getMessagesToRetry()
+  
+  if (messagesToRetry.length === 0) {
+    return
+  }
+  
+  console.log(`Flushing retry queue: ${messagesToRetry.length} messages`)
+  
+  try {
+    const token = await getAuthToken()
+    
+    // Convert to API format
+    const batchPayload = messagesToRetry.map(m => ({
+      thread_id: m.threadId,
+      agent_slug: m.agentSlug,
+      role: m.role,
+      content: m.content,
+      tool_calls_summary: m.toolCallsSummary,
+    }))
+    
+    const response = await fetch(`${API_BASE}/v1/messages/batch`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ messages: batchPayload }),
+    })
+    
+    if (response.ok) {
+      // Success - remove from queue
+      removeFromRetryQueue(messagesToRetry.map(m => m.id))
+      console.log('Retry queue flushed successfully')
+    } else {
+      // Failed - increment retry count
+      markMessagesRetried(messagesToRetry.map(m => m.id))
+      console.warn('Retry queue flush failed, will retry later')
+    }
+    
+  } catch (error) {
+    // Mark as retried (increments count)
+    markMessagesRetried(messagesToRetry.map(m => m.id))
+    console.warn('Retry queue flush error:', error)
+  }
+}
+
+// Re-export persistence utilities for convenience
+export { 
+  compressToolCalls,
+  type ToolCallSummary,
+  type QueuedMessage,
+} from './persistence'
