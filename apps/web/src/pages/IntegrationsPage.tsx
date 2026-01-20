@@ -153,13 +153,19 @@ export default function IntegrationsPage() {
     loadConnections()
   }, [loadConnections])
 
-  // Check for OAuth callback on mount
+  // Listen for OAuth callback messages from popup
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('connection_status') === 'success') {
-      window.history.replaceState({}, '', window.location.pathname)
-      loadConnections()
+    const handleMessage = (event: MessageEvent) => {
+      // Validate origin for security
+      if (event.origin !== window.location.origin) return
+      
+      if (event.data?.type === 'oauth_callback') {
+        loadConnections()
+      }
     }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
   }, [loadConnections])
 
   const handleConnect = async (appKey: string) => {
@@ -171,17 +177,23 @@ export default function IntegrationsPage() {
         appKey,
         'personal',
         undefined,
-        `${window.location.origin}/integrations?connection_status=success`
+        `${window.location.origin}/oauth/callback?connection_status=success`
       )
       
       if (!result.redirect_url) {
         throw new Error('No redirect URL received. The integration may need configuration.')
       }
       
+      // Calculate center position for popup
+      const popupWidth = 600
+      const popupHeight = 700
+      const left = window.screenX + (window.outerWidth - popupWidth) / 2
+      const top = window.screenY + (window.outerHeight - popupHeight) / 2
+      
       const popup = window.open(
         result.redirect_url, 
         `connect_${appKey}`,
-        'width=600,height=700,scrollbars=yes,resizable=yes'
+        `width=${popupWidth},height=${popupHeight},left=${left},top=${top},scrollbars=yes,resizable=yes`
       )
       
       if (!popup || popup.closed || typeof popup.closed === 'undefined') {
@@ -276,25 +288,31 @@ export default function IntegrationsPage() {
     return { primaryApps: primary, otherApps: other }
   }, [apps])
 
-  // Filter by search query
+  // Filter by search query and exclude already connected apps
   const filteredPrimaryApps = useMemo(() => {
-    if (!searchQuery.trim()) return primaryApps
+    // Exclude connected apps - they're shown in the Connected Apps section
+    const notConnected = primaryApps.filter(app => !isAppConnected(app.key))
+    
+    if (!searchQuery.trim()) return notConnected
     const query = searchQuery.toLowerCase()
-    return primaryApps.filter(app => 
+    return notConnected.filter(app => 
       app.name.toLowerCase().includes(query) ||
       app.key.toLowerCase().includes(query)
     )
-  }, [primaryApps, searchQuery])
+  }, [primaryApps, searchQuery, connectedAppsMap])
 
   const filteredOtherApps = useMemo(() => {
-    if (!searchQuery.trim()) return otherApps
+    // Exclude connected apps - they're shown in the Connected Apps section
+    const notConnected = otherApps.filter(app => !isAppConnected(app.key))
+    
+    if (!searchQuery.trim()) return notConnected
     const query = searchQuery.toLowerCase()
-    return otherApps.filter(app => 
+    return notConnected.filter(app => 
       app.name.toLowerCase().includes(query) ||
       app.key.toLowerCase().includes(query) ||
       app.categories.some(cat => cat.toLowerCase().includes(query))
     )
-  }, [otherApps, searchQuery])
+  }, [otherApps, searchQuery, connectedAppsMap])
 
   const filteredConnections = useMemo(() => {
     if (!searchQuery.trim()) return connections

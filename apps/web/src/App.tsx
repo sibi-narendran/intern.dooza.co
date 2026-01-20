@@ -10,6 +10,7 @@ import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import WorkforceGalleryPage from './pages/WorkforceGalleryPage'
 import ChatPage from './pages/ChatPage'
 import SettingsPage from './pages/SettingsPage'
+import OAuthCallbackPage from './pages/OAuthCallbackPage'
 
 // Layout wrapper for main app pages (with sidebar)
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -63,6 +64,9 @@ function App() {
                   <SettingsPage />
                 </AppLayout>
               } />
+              
+              {/* OAuth callback - lightweight page, no sidebar */}
+              <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
               
               {/* Fallback */}
               <Route path="*" element={
