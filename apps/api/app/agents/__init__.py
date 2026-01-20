@@ -36,6 +36,15 @@ from app.agents.factory import (
     is_valid_agent,
 )
 
+# Agent Registry (singleton pattern)
+from app.agents.registry import (
+    AgentRegistry,
+    AgentRegistration,
+    get_agent_registry,
+    reset_agent_registry,
+    AGENT_REGISTRATIONS,
+)
+
 # Events (for SSE streaming)
 from app.agents.events import (
     AgentEvent,
@@ -69,6 +78,13 @@ __all__ = [
     "is_supervisor_agent",
     "get_agent_config",
     "is_valid_agent",
+    
+    # Registry
+    "AgentRegistry",
+    "AgentRegistration",
+    "get_agent_registry",
+    "reset_agent_registry",
+    "AGENT_REGISTRATIONS",
     
     # Events
     "AgentEvent",

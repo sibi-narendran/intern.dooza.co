@@ -2,10 +2,13 @@
 Agent Factory
 
 Creates and manages AI agent instances with:
-- SEOmi supervisor (langgraph-supervisor pattern)
+- Registry-based supervisor lookup (no hardcoded if/else)
 - Legacy simple agents (no tools)
 - Thread-safe caching
 - Graceful fallback on DB failures
+
+Note: Supervisor agents are now managed via AgentRegistry.
+This factory delegates to the registry for supervisor creation.
 """
 
 from __future__ import annotations
@@ -15,19 +18,25 @@ import time
 from typing import Any, Dict, FrozenSet, List, Optional
 
 from app.core.database import get_checkpointer, get_supabase_client
+from app.agents.registry import get_agent_registry, AGENT_REGISTRATIONS
 
 logger = logging.getLogger(__name__)
 
-# Thread-safe cache
-_supervisor_cache: Dict[str, Any] = {}
+# Thread-safe cache for legacy agents only
+# Supervisor caching is handled by AgentRegistry
 _agent_cache: Dict[str, Any] = {}
 _cache_timestamp: float = 0
 _cache_lock = threading.Lock()
 CACHE_TTL = 300  # 5 minutes
 
-# Agent types
+# Agent types - derived from registry for supervisors
 FALLBACK_AGENTS: FrozenSet[str] = frozenset({"pam", "penn", "seomi", "cassie", "dexter", "soshie"})
-SUPERVISOR_AGENTS: FrozenSet[str] = frozenset({"seomi"})
+
+def _get_supervisor_slugs() -> FrozenSet[str]:
+    """Get supervisor slugs from registry."""
+    return frozenset(AGENT_REGISTRATIONS.keys())
+
+SUPERVISOR_AGENTS: FrozenSet[str] = _get_supervisor_slugs()
 
 
 # =============================================================================
@@ -37,6 +46,8 @@ SUPERVISOR_AGENTS: FrozenSet[str] = frozenset({"seomi"})
 def get_supervisor_app(agent_slug: str, checkpointer=None):
     """
     Get a compiled supervisor app for agent_slug.
+    
+    Delegates to AgentRegistry for lazy loading and caching.
     
     Args:
         agent_slug: The agent identifier (e.g., 'seomi')
@@ -48,29 +59,23 @@ def get_supervisor_app(agent_slug: str, checkpointer=None):
     Raises:
         ValueError: If agent_slug is not a supervisor agent
     """
-    if agent_slug not in SUPERVISOR_AGENTS:
-        raise ValueError(f"'{agent_slug}' is not a supervisor agent")
+    registry = get_agent_registry()
     
-    cache_key = f"{agent_slug}:{id(checkpointer)}"
-    with _cache_lock:
-        if cache_key in _supervisor_cache:
-            return _supervisor_cache[cache_key]
+    if not registry.is_supervisor(agent_slug):
+        available = registry.list_supervisors()
+        raise ValueError(
+            f"'{agent_slug}' is not a supervisor agent. "
+            f"Available supervisors: {available}"
+        )
     
-    if agent_slug == "seomi":
-        from app.agents.seomi import get_seomi_app
-        app = get_seomi_app(checkpointer=checkpointer)
-    else:
-        raise ValueError(f"Unknown supervisor agent: {agent_slug}")
-    
-    with _cache_lock:
-        _supervisor_cache[cache_key] = app
-    
-    return app
+    # Registry handles caching and lazy loading
+    return registry.get_agent(agent_slug, checkpointer=checkpointer)
 
 
 def is_supervisor_agent(agent_slug: str) -> bool:
     """Check if an agent uses the supervisor pattern."""
-    return agent_slug in SUPERVISOR_AGENTS
+    registry = get_agent_registry()
+    return registry.is_supervisor(agent_slug)
 
 
 # =============================================================================
@@ -139,7 +144,9 @@ def _refresh_cache_if_needed() -> None:
 
 def get_agent_config(agent_slug: str) -> Optional[Dict[str, Any]]:
     """Get agent configuration by slug."""
-    if agent_slug in SUPERVISOR_AGENTS:
+    registry = get_agent_registry()
+    
+    if registry.is_supervisor(agent_slug):
         return _get_supervisor_config(agent_slug)
     
     _refresh_cache_if_needed()
@@ -155,7 +162,19 @@ def get_agent_config(agent_slug: str) -> Optional[Dict[str, Any]]:
 
 
 def _get_supervisor_config(agent_slug: str) -> Dict[str, Any]:
-    """Get config for supervisor agents."""
+    """Get config for supervisor agents from registry."""
+    registry = get_agent_registry()
+    registration = registry.get_registration(agent_slug)
+    
+    if registration is None:
+        return {
+            "id": None,
+            "slug": agent_slug,
+            "name": agent_slug.capitalize(),
+            "is_supervisor": True,
+        }
+    
+    # Try to get detailed config from the agent module
     if agent_slug == "seomi":
         from app.agents.seomi import SEOMI_CONFIG
         return {
@@ -167,10 +186,12 @@ def _get_supervisor_config(agent_slug: str) -> Dict[str, Any]:
             "is_supervisor": True,
         }
     
+    # Generic config from registration
     return {
         "id": None,
-        "slug": agent_slug,
-        "name": agent_slug.capitalize(),
+        "slug": registration.slug,
+        "name": registration.slug.capitalize(),
+        "description": registration.description,
         "is_supervisor": True,
     }
 
@@ -207,9 +228,14 @@ def get_all_agent_slugs() -> List[str]:
 
 
 def clear_agent_cache() -> None:
-    """Clear all caches."""
-    global _agent_cache, _supervisor_cache, _cache_timestamp
+    """Clear all caches (legacy + registry)."""
+    global _agent_cache, _cache_timestamp
+    
+    # Clear legacy cache
     with _cache_lock:
         _agent_cache = {}
-        _supervisor_cache = {}
         _cache_timestamp = 0
+    
+    # Clear supervisor cache via registry
+    registry = get_agent_registry()
+    registry.clear_cache()

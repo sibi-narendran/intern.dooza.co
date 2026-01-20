@@ -45,6 +45,7 @@ class GalleryAgent(BaseModel):
     rating_count: int = 0
     tier: str = "free"
     created_by: Optional[str] = None  # NULL = Dooza, UUID = user
+    chat_enabled: bool = False  # Whether agent supports chat (has tools/supervisor)
 
 
 class GalleryAgentDetail(GalleryAgent):
@@ -67,6 +68,7 @@ class HiredAgent(BaseModel):
     is_active: bool = True
     hired_at: str
     last_used_at: Optional[str] = None
+    chat_enabled: bool = False  # Whether agent supports chat (has tools/supervisor)
 
 
 class HireRequest(BaseModel):
@@ -108,7 +110,7 @@ async def list_gallery_agents(
         query = supabase.table("gallery_agents").select(
             "id, slug, name, role, description, avatar_url, gradient, "
             "capabilities, integrations, tags, is_featured, install_count, "
-            "rating_avg, rating_count, tier, created_by"
+            "rating_avg, rating_count, tier, created_by, chat_enabled"
         ).eq("is_published", True)
         
         if featured_only:
@@ -331,10 +333,10 @@ async def get_my_team(
         )
     
     try:
-        # Join hired_agents with gallery_agents
+        # Join hired_agents with gallery_agents (include chat_enabled)
         result = supabase.table("hired_agents").select(
             "id, agent_id, is_active, hired_at, last_used_at, "
-            "gallery_agents(slug, name, role, description, avatar_url, gradient, capabilities, integrations)"
+            "gallery_agents(slug, name, role, description, avatar_url, gradient, capabilities, integrations, chat_enabled)"
         ).eq("user_id", user_id).eq("is_active", True).order("hired_at", desc=True).execute()
         
         hired_agents = []
@@ -353,7 +355,8 @@ async def get_my_team(
                 integrations=agent.get("integrations", []),
                 is_active=item["is_active"],
                 hired_at=item["hired_at"],
-                last_used_at=item.get("last_used_at")
+                last_used_at=item.get("last_used_at"),
+                chat_enabled=agent.get("chat_enabled", False),
             ))
         
         return hired_agents

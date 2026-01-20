@@ -50,12 +50,10 @@ const Dashboard = () => {
         fetchTeam();
     }, [fetchTeam]);
 
-    // Agents that have chat capability (tool-enabled)
-    const CHAT_ENABLED_AGENTS = ['seomi'];
-
     // Handle agent click - navigate to chat for enabled agents, otherwise open modal
     const handleAgentClick = (agent) => {
-        if (CHAT_ENABLED_AGENTS.includes(agent.slug)) {
+        // Chat capability now comes from API (no hardcoded list)
+        if (agent.chat_enabled) {
             // Navigate to chat page
             navigate(`/chat/${agent.slug}`);
         } else {

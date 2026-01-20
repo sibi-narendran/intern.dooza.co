@@ -29,6 +29,8 @@ export interface GalleryAgent {
   rating_count: number
   tier: 'free' | 'pro' | 'enterprise'
   created_by: string | null
+  /** Whether this agent supports chat (has tools/supervisor) */
+  chat_enabled: boolean
 }
 
 export interface HiredAgent {
@@ -45,6 +47,8 @@ export interface HiredAgent {
   is_active: boolean
   hired_at: string
   last_used_at: string | null
+  /** Whether this agent supports chat (has tools/supervisor) */
+  chat_enabled: boolean
 }
 
 export interface HireResponse {

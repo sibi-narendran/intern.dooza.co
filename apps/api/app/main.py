@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     Manage application lifecycle - startup and shutdown.
     
     Standard LangGraph production pattern:
-    1. Initialize checkpointer FIRST (for memory)
+    1. Initialize checkpointer (for memory)
     2. Setup LangGraph routes AFTER (so they have checkpointer)
     """
     logger.info("Starting Dooza AI API...")

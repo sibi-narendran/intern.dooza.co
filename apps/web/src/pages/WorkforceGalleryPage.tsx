@@ -388,9 +388,6 @@ export default function WorkforceGalleryPage() {
 // Agent Card Component
 // ============================================================================
 
-// Agents that have chat capability (tool-enabled)
-const CHAT_ENABLED_AGENTS = ['seomi']
-
 interface AgentCardProps {
   agent: GalleryAgent
   isHired: boolean
@@ -402,7 +399,8 @@ interface AgentCardProps {
 
 function AgentCard({ agent, isHired, onHire, onRemove, isHiring, isRemoving }: AgentCardProps) {
   const navigate = useNavigate()
-  const isChatEnabled = CHAT_ENABLED_AGENTS.includes(agent.slug)
+  // Chat capability now comes from API (no hardcoded list)
+  const isChatEnabled = agent.chat_enabled ?? false
   return (
     <div
       style={{

@@ -2,6 +2,7 @@
 LangGraph API Router
 
 Standard LangGraph production pattern:
+- Dynamic agent routing via /{agent_slug}/ path parameter
 - Direct graph invocation with PostgreSQL checkpointer
 - Native event streaming via astream_events()
 - Full visibility into supervisor, delegation, and specialist activity
@@ -10,10 +11,13 @@ This is the recommended self-hosted pattern:
 - Uses standard LangGraph APIs internally
 - Custom FastAPI wrapper for HTTP handling
 - No deprecated LangServe dependency
+- Registry-based agent discovery (no hardcoded agent names)
 
 Endpoints:
-- POST /langserve/seomi/invoke - Synchronous invoke
-- POST /langserve/seomi/stream_events - Native LangGraph event streaming (full visibility)
+- POST /langserve/{agent_slug}/invoke - Synchronous invoke
+- POST /langserve/{agent_slug}/stream_events - Native LangGraph event streaming
+- GET /langserve/{agent_slug}/input_schema - Input schema for documentation
+- GET /langserve/agents - List available agents
 """
 
 import json
@@ -23,7 +27,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.agents.seomi import create_seomi_supervisor
+from app.agents.registry import get_agent_registry
 from app.core.database import get_checkpointer
 from app.tools.registry import get_tool_registry
 
@@ -95,26 +99,44 @@ class InvokeResponse(BaseModel):
 
 
 # =============================================================================
-# GRAPH INSTANCE (Singleton)
+# GRAPH INSTANCE FACTORY (Registry-based)
 # =============================================================================
 
-_seomi_graph = None
-
-
-def _get_seomi_graph():
-    """Get or create the SEOmi supervisor graph."""
-    global _seomi_graph
+def _get_agent_graph(agent_slug: str):
+    """
+    Get a compiled agent graph by slug.
     
-    if _seomi_graph is None:
-        checkpointer = get_checkpointer()
-        _seomi_graph = create_seomi_supervisor(checkpointer=checkpointer)
+    Uses AgentRegistry for lazy loading and caching.
+    Each agent is compiled once with the checkpointer and reused.
+    
+    Args:
+        agent_slug: Agent identifier (e.g., 'seomi', 'penn')
         
-        if checkpointer:
-            logger.info("SEOmi graph created WITH checkpointer (memory enabled)")
-        else:
-            logger.warning("SEOmi graph created WITHOUT checkpointer (no memory)")
+    Returns:
+        Compiled LangGraph workflow
+        
+    Raises:
+        HTTPException: If agent not found or not a supervisor
+    """
+    registry = get_agent_registry()
     
-    return _seomi_graph
+    if not registry.is_valid_agent(agent_slug):
+        available = registry.list_supervisors()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{agent_slug}' not found. Available: {available}"
+        )
+    
+    if not registry.is_supervisor(agent_slug):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent '{agent_slug}' does not support chat (not a supervisor)"
+        )
+    
+    checkpointer = get_checkpointer()
+    graph = registry.get_agent(agent_slug, checkpointer=checkpointer)
+    
+    return graph
 
 
 # =============================================================================
@@ -126,18 +148,43 @@ def setup_langgraph_routes(app: FastAPI):
     Add LangGraph API routes to the FastAPI app.
     
     Standard LangGraph pattern:
+    - Dynamic agent routing via /{agent_slug}/ path
     - Direct graph invocation with configurable thread_id
     - PostgreSQL checkpointer for conversation memory
     - Native event streaming for full visibility
+    
+    Adding new agents requires only:
+    1. Creating the agent file (e.g., agents/penn.py)
+    2. Registering in AGENT_REGISTRATIONS (agents/registry.py)
+    No route changes needed.
     """
     
-    # Eagerly create graph at startup
-    graph = _get_seomi_graph()
+    # Log available agents at startup
+    registry = get_agent_registry()
+    available = registry.list_supervisors()
+    logger.info(f"LangGraph routes ready for agents: {available}")
     
-    @app.post("/langserve/seomi/invoke")
-    async def invoke_seomi(request: InvokeRequest) -> InvokeResponse:
+    @app.get("/langserve/agents")
+    async def list_available_agents():
+        """List all agents available for chat."""
+        registry = get_agent_registry()
+        agents = []
+        for slug in registry.list_supervisors():
+            reg = registry.get_registration(slug)
+            agents.append({
+                "slug": slug,
+                "type": reg.agent_type if reg else "unknown",
+                "description": reg.description if reg else "",
+            })
+        return {"agents": agents}
+    
+    @app.post("/langserve/{agent_slug}/invoke")
+    async def invoke_agent(agent_slug: str, request: InvokeRequest) -> InvokeResponse:
         """
-        Invoke SEOmi synchronously.
+        Invoke an agent synchronously.
+        
+        Path parameters:
+            agent_slug: Agent identifier (e.g., 'seomi', 'penn')
         
         Request body:
         {
@@ -145,6 +192,9 @@ def setup_langgraph_routes(app: FastAPI):
             "config": {"configurable": {"thread_id": "unique-thread-id"}}
         }
         """
+        # Get the agent graph (validates and caches)
+        graph = _get_agent_graph(agent_slug)
+        
         # Extract config with thread_id
         config = request.config or {}
         configurable = config.get("configurable", {})
@@ -169,10 +219,13 @@ def setup_langgraph_routes(app: FastAPI):
         return InvokeResponse(output=result)
     
     
-    @app.post("/langserve/seomi/stream_events")
-    async def stream_events_seomi(request: Request):
+    @app.post("/langserve/{agent_slug}/stream_events")
+    async def stream_events(agent_slug: str, request: Request):
         """
-        Stream SEOmi response via SSE with native LangGraph events.
+        Stream agent response via SSE with native LangGraph events.
+        
+        Path parameters:
+            agent_slug: Agent identifier (e.g., 'seomi', 'penn')
         
         This provides full visibility into:
         - on_chat_model_stream: Token streaming from ALL agents (supervisor + specialists)
@@ -182,6 +235,8 @@ def setup_langgraph_routes(app: FastAPI):
         
         Frontend parses native events directly - no transformation needed.
         """
+        # Get the agent graph (validates and caches)
+        graph = _get_agent_graph(agent_slug)
         # Parse request body
         body = await request.json()
         input_data = body.get("input", {})
@@ -303,11 +358,16 @@ def setup_langgraph_routes(app: FastAPI):
         )
     
     
-    @app.get("/langserve/seomi/input_schema")
-    async def input_schema():
+    @app.get("/langserve/{agent_slug}/input_schema")
+    async def input_schema(agent_slug: str):
         """Return input schema for documentation."""
+        # Validate agent exists
+        registry = get_agent_registry()
+        if not registry.is_valid_agent(agent_slug):
+            raise HTTPException(status_code=404, detail=f"Agent '{agent_slug}' not found")
+        
         return {
-            "title": "SEOmi Input Schema",
+            "title": f"{agent_slug.capitalize()} Input Schema",
             "description": "Standard LangGraph input format",
             "type": "object",
             "properties": {
@@ -345,5 +405,6 @@ def setup_langgraph_routes(app: FastAPI):
             "required": ["input", "config"]
         }
     
-    logger.info("LangGraph API routes added at /langserve/seomi/*")
+    logger.info("LangGraph API routes added at /langserve/{agent_slug}/*")
+    logger.info(f"Available agents: {registry.list_supervisors()}")
     logger.info("Standard LangGraph pattern - native event streaming enabled")
