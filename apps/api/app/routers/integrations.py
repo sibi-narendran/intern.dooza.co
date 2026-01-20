@@ -233,17 +233,23 @@ async def list_connections(
         entity = client.get_entity(id=entity_id)
         connections = entity.get_connections()
         
-        return [
-            ConnectionInfo(
+        result = []
+        for conn in connections:
+            # Handle both old (snake_case) and new (camelCase) SDK attribute names
+            app_key = getattr(conn, 'appUniqueId', None) or getattr(conn, 'app_unique_key', None) or getattr(conn, 'appId', None) or 'unknown'
+            app_name = getattr(conn, 'appName', None) or getattr(conn, 'app_name', None) or app_key
+            created_at = getattr(conn, 'createdAt', None) or getattr(conn, 'created_at', None) or ''
+            
+            result.append(ConnectionInfo(
                 id=conn.id,
-                app_key=conn.app_unique_key,
-                app_name=conn.app_name or conn.app_unique_key,
+                app_key=app_key,
+                app_name=app_name,
                 status=conn.status,
-                created_at=str(conn.created_at),
+                created_at=str(created_at),
                 account_display=getattr(conn, 'account_display', None)
-            )
-            for conn in connections
-        ]
+            ))
+        
+        return result
     except Exception as e:
         logger.error(f"Failed to fetch connections: {e}")
         return []

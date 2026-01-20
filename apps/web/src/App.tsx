@@ -9,6 +9,7 @@ import IntegrationsPage from './pages/IntegrationsPage'
 import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import WorkforceGalleryPage from './pages/WorkforceGalleryPage'
 import ChatPage from './pages/ChatPage'
+import SettingsPage from './pages/SettingsPage'
 
 // Layout wrapper for main app pages (with sidebar)
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -55,6 +56,11 @@ function App() {
               <Route path="/gallery" element={
                 <AppLayout>
                   <WorkforceGalleryPage />
+                </AppLayout>
+              } />
+              <Route path="/settings" element={
+                <AppLayout>
+                  <SettingsPage />
                 </AppLayout>
               } />
               

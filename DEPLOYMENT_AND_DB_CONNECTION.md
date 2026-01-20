@@ -195,13 +195,17 @@ asyncio.run(test())
 
 | Variable | Description |
 |----------|-------------|
-| `OPENROUTER_API_KEY` | LLM API key |
-| `DEFAULT_MODEL` | anthropic/claude-3.5-sonnet |
+| `LLM_PROVIDER` | LLM provider: openai, openrouter, or gemini |
+| `OPENAI_API_KEY` | OpenAI API key (recommended for LangGraph) |
+| `OPENAI_MODEL` | OpenAI model (gpt-4o) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (backup) |
+| `DEFAULT_MODEL` | Default model name |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Service role key (backend only) |
 | `SUPABASE_JWT_SECRET` | For validating user tokens |
 | `DATABASE_URL` | PostgreSQL connection (pooler) |
 | `CORS_ORIGINS` | Allowed frontend origins |
+| `COMPOSIO_API_KEY` | Composio API key for integrations |
 | `DEBUG` | false |
 
 ---
@@ -236,6 +240,9 @@ curl https://dooza-api.onrender.com/health
 
 # Deploy (both auto-deploy on push)
 git add -A && git commit -m "update" && git push
+
+you also have deploy keys file
+
 ```
 
 ---
@@ -273,4 +280,4 @@ git add -A && git commit -m "update" && git push
 
 ---
 
-*Last updated: 2026-01-18*
+*Last updated: 2026-01-20*

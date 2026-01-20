@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { LogOut, Settings, ExternalLink, Building2, User, ChevronUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { LogOut, Settings, Building2, ChevronUp } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const UserMenu = () => {
   const { user, profile, currentOrg, signOut } = useAuth()
+  const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -31,10 +33,9 @@ const UserMenu = () => {
     }
   }, [isOpen, closeMenu])
 
-  const handleAccountSettings = () => {
-    const accountsUrl = import.meta.env.VITE_ACCOUNTS_URL || 'https://accounts.dooza.ai'
-    window.open(`${accountsUrl}/settings`, '_blank')
+  const handleSettings = () => {
     closeMenu()
+    navigate('/settings')
   }
 
   const handleLogout = async () => {
@@ -133,22 +134,12 @@ const UserMenu = () => {
 
             <div className="sidebar-user__menu-items" role="group">
               <button 
-                onClick={handleAccountSettings} 
-                className="sidebar-user__menu-item"
-                role="menuitem"
-              >
-                <User size={18} />
-                <span>My Profile</span>
-              </button>
-
-              <button 
-                onClick={handleAccountSettings} 
+                onClick={handleSettings} 
                 className="sidebar-user__menu-item"
                 role="menuitem"
               >
                 <Settings size={18} />
-                <span>Account Settings</span>
-                <ExternalLink size={14} className="sidebar-user__external-icon" />
+                <span>Settings</span>
               </button>
             </div>
 

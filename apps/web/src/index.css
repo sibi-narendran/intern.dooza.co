@@ -158,6 +158,19 @@ body {
     to { transform: rotate(360deg); }
 }
 
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.animate-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
 /* ======================
    Login Prompt
    ====================== */
@@ -1424,4 +1437,28 @@ body {
 .chat-page__send-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* ======================
+   Integrations Page
+   ====================== */
+
+.integrations-search {
+    width: 100%;
+    padding: 14px 48px;
+    border-radius: 12px;
+    border: 1px solid var(--gray-200);
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    background: transparent;
+}
+
+.integrations-search:focus {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px var(--primary-100);
+}
+
+.integrations-search::placeholder {
+    color: var(--gray-400);
 }
