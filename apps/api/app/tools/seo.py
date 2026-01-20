@@ -26,7 +26,14 @@ import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, field_validator
 
-from app.tools.base import DoozaTool, ToolMetadata
+from app.tools.base import (
+    DoozaTool,
+    ToolMetadata,
+    ToolUISchema,
+    UIDisplayType,
+    UISection,
+    FieldMapping,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +461,81 @@ class AnalyzeUrlTool(DoozaTool):
         name="Analyze URL",
         description="Comprehensive SEO analysis of a website",
         min_tier="free",
+        ui_schema=ToolUISchema(
+            display=UIDisplayType.SCORE_CARD,
+            title="SEO Analysis",
+            summary_template="Score: {overall_score}/100 • {issues_count} issues",
+            score_field="overall_score",
+            sections=[
+                UISection(
+                    id="overview",
+                    label="Overview",
+                    display=UIDisplayType.SCORE_CARD,
+                    icon="Globe",
+                    score_field="overall_score",
+                    fields=[
+                        FieldMapping("issues_count", "Issues Found", "number"),
+                        FieldMapping("word_count", "Word Count", "number"),
+                    ],
+                ),
+                UISection(
+                    id="meta",
+                    label="Meta Tags",
+                    display=UIDisplayType.KEY_VALUE,
+                    icon="FileText",
+                    score_field="meta_tags.score",
+                    fields=[
+                        FieldMapping("meta_tags.title", "Title"),
+                        FieldMapping("meta_tags.title_length", "Title Length", "number"),
+                        FieldMapping("meta_tags.description", "Description"),
+                        FieldMapping("meta_tags.description_length", "Description Length", "number"),
+                        FieldMapping("meta_tags.canonical", "Canonical URL", "url"),
+                    ],
+                ),
+                UISection(
+                    id="headings",
+                    label="Headings",
+                    display=UIDisplayType.KEY_VALUE,
+                    icon="Heading",
+                    score_field="headings.score",
+                    fields=[
+                        FieldMapping("headings.h1_count", "H1 Count", "number"),
+                        FieldMapping("headings.h1_texts", "H1 Texts"),
+                        FieldMapping("headings.h2_count", "H2 Count", "number"),
+                    ],
+                ),
+                UISection(
+                    id="images",
+                    label="Images",
+                    display=UIDisplayType.KEY_VALUE,
+                    icon="Image",
+                    score_field="images.score",
+                    fields=[
+                        FieldMapping("images.total", "Total Images", "number"),
+                        FieldMapping("images.with_alt", "With Alt Text", "number"),
+                        FieldMapping("images.without_alt", "Missing Alt Text", "number"),
+                    ],
+                ),
+                UISection(
+                    id="keywords",
+                    label="Keywords",
+                    display=UIDisplayType.DATA_TABLE,
+                    icon="Key",
+                    fields=[
+                        FieldMapping("keywords", "Top Keywords"),
+                    ],
+                ),
+                UISection(
+                    id="issues",
+                    label="Issues",
+                    display=UIDisplayType.ISSUES_LIST,
+                    icon="AlertCircle",
+                    fields=[
+                        FieldMapping("all_issues", "All Issues"),
+                    ],
+                ),
+            ],
+        ),
     )
     
     async def _arun(self, url: str) -> Dict[str, Any]:
@@ -569,6 +651,20 @@ class AuditMetaTagsTool(DoozaTool):
         name="Audit Meta Tags",
         description="Check meta tags of a website",
         min_tier="free",
+        ui_schema=ToolUISchema(
+            display=UIDisplayType.SCORE_CARD,
+            title="Meta Tags Audit",
+            summary_template="Score: {score}/100",
+            score_field="score",
+            fields=[
+                FieldMapping("title", "Title"),
+                FieldMapping("title_length", "Title Length", "number"),
+                FieldMapping("description", "Description"),
+                FieldMapping("description_length", "Description Length", "number"),
+                FieldMapping("canonical", "Canonical URL", "url"),
+                FieldMapping("robots", "Robots Meta"),
+            ],
+        ),
     )
     
     async def _arun(self, url: str) -> Dict[str, Any]:
@@ -609,6 +705,20 @@ class AnalyzeHeadingsTool(DoozaTool):
         name="Analyze Headings",
         description="Analyze heading structure of a website",
         min_tier="free",
+        ui_schema=ToolUISchema(
+            display=UIDisplayType.SCORE_CARD,
+            title="Heading Structure",
+            summary_template="Score: {score}/100 • {h1_count} H1, {h2_count} H2",
+            score_field="score",
+            fields=[
+                FieldMapping("h1_count", "H1 Count", "number"),
+                FieldMapping("h1_texts", "H1 Headings"),
+                FieldMapping("h2_count", "H2 Count", "number"),
+                FieldMapping("h2_texts", "H2 Headings"),
+                FieldMapping("h3_count", "H3 Count", "number"),
+                FieldMapping("issues", "Issues"),
+            ],
+        ),
     )
     
     async def _arun(self, url: str) -> Dict[str, Any]:
@@ -649,6 +759,19 @@ class CheckImagesTool(DoozaTool):
         name="Check Images",
         description="Check image alt tags on a website",
         min_tier="free",
+        ui_schema=ToolUISchema(
+            display=UIDisplayType.SCORE_CARD,
+            title="Image Alt Tags",
+            summary_template="Score: {score}/100 • {total_images} images",
+            score_field="score",
+            fields=[
+                FieldMapping("total_images", "Total Images", "number"),
+                FieldMapping("images_with_alt", "With Alt Text", "number"),
+                FieldMapping("images_without_alt", "Missing Alt", "number"),
+                FieldMapping("images_with_empty_alt", "Empty Alt", "number"),
+                FieldMapping("issues", "Issues"),
+            ],
+        ),
     )
     
     async def _arun(self, url: str) -> Dict[str, Any]:
@@ -692,6 +815,15 @@ class ExtractKeywordsTool(DoozaTool):
         name="Extract Keywords",
         description="Extract keywords from website content",
         min_tier="free",
+        ui_schema=ToolUISchema(
+            display=UIDisplayType.DATA_TABLE,
+            title="Keyword Analysis",
+            summary_template="{word_count} words analyzed",
+            fields=[
+                FieldMapping("word_count", "Total Words", "number"),
+                FieldMapping("keywords", "Top Keywords"),
+            ],
+        ),
     )
     
     async def _arun(self, url: str, top_n: int = 20) -> Dict[str, Any]:

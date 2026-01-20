@@ -34,8 +34,8 @@ import {
 import { getQueuedMessageCount } from '../lib/persistence'
 import ChatHistoryDropdown from '../components/ChatHistoryDropdown'
 import MarkdownRenderer from '../components/MarkdownRenderer'
-import { SEOAnalysisCard } from '../components/seo'
-import { SEOAnalysisResult, isSEOAnalysisResult } from '../types/seo'
+import { DynamicToolRenderer } from '../components/tools'
+import { ToolUISchema, formatSummary } from '../types/tool-ui'
 
 // ============================================================================
 // Types
@@ -65,7 +65,6 @@ interface ChatMessage extends Message {
 // Components
 // ============================================================================
 
-/** Industry-standard collapsible tool indicator with rich SEO card */
 /** Format tool names for user-friendly display */
 function formatToolNameForUser(name: string): string {
   const mapping: Record<string, string> = {
@@ -79,7 +78,10 @@ function formatToolNameForUser(name: string): string {
   return mapping[name] || name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-/** User-friendly tool indicator with expandable results */
+/** 
+ * User-friendly tool indicator with expandable results.
+ * Uses Server-Driven UI - renders based on ui_schema from backend.
+ */
 function ToolIndicator({ tool }: { tool: ToolCall }) {
   const [isExpanded, setIsExpanded] = useState(false)
   
@@ -97,12 +99,19 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
     }
   })()
   
-  // Check if this is SEO data (has overall_score)
-  const isSEOResult = parsedResult && isSEOAnalysisResult(parsedResult)
+  // Get UI schema from tool (Server-Driven UI)
+  const uiSchema = tool.ui_schema as ToolUISchema | undefined
   
-  // Get result summary
+  // Get result summary from schema template or fallback
   const getResultSummary = () => {
     if (!parsedResult) return null
+    
+    // Use schema's summary_template if available
+    if (uiSchema?.summary_template) {
+      return formatSummary(uiSchema.summary_template, parsedResult)
+    }
+    
+    // Fallback for legacy/unknown tools
     if (parsedResult.overall_score !== undefined) {
       return `Score: ${parsedResult.overall_score}/100 • ${parsedResult.issues_count || 0} issues`
     }
@@ -193,35 +202,16 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
         )}
       </div>
       
-      {/* Expanded content - SEO card OR raw JSON */}
+      {/* Expanded content - Dynamic renderer based on ui_schema */}
       {isExpanded && hasResult && (
         <div style={{
           borderTop: '1px solid #e2e8f0',
-          background: isSEOResult ? 'white' : '#f1f5f9',
+          background: 'white',
         }}>
-          {isSEOResult ? (
-            /* Rich SEO Analysis Card */
-            <div style={{ padding: '0' }}>
-              <SEOAnalysisCard data={parsedResult as SEOAnalysisResult} defaultExpanded={true} />
-            </div>
-          ) : (
-            /* Fallback: Raw JSON */
-            <div style={{ padding: '12px', maxHeight: '300px', overflow: 'auto' }}>
-              <pre style={{
-                fontSize: '11px',
-                fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
-                color: '#475569',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                margin: 0,
-              }}>
-                {typeof tool.result === 'string' 
-                  ? tool.result 
-                  : JSON.stringify(tool.result, null, 2)
-                }
-              </pre>
-            </div>
-          )}
+          <DynamicToolRenderer 
+            data={parsedResult} 
+            schema={uiSchema || null} 
+          />
         </div>
       )}
     </div>
@@ -583,7 +573,7 @@ export default function ChatPage() {
       toolCalls: msg.tool_calls_summary?.map(tc => ({
         name: tc.name,
         args: tc.args,
-        status: (tc.status || 'complete') as 'complete' | 'error',
+        status: (tc.status || 'complete') as 'pending' | 'running' | 'complete' | 'error',
         result: tc.summary ? tc.summary : undefined,
       })),
       isStreaming: false,
@@ -679,13 +669,10 @@ export default function ChatPage() {
     setIsStreaming(true)
     setError(null)
     
-    // Save user message to backend (async, non-blocking)
-    saveMessage({
-      threadId: currentThreadId,
-      agentSlug,
-      role: 'user',
-      content: userMessage.content,
-    }).catch(err => console.warn('Failed to save user message:', err))
+    // Track user message content for saving when we get the real thread ID
+    const userMessageContent = userMessage.content
+    let userMessageSaved = false
+    let receivedThreadId: string | null = null
     
     // Track assistant message for saving on completion
     let finalAssistantContent = ''
@@ -783,11 +770,11 @@ export default function ChatPage() {
             }))
           },
           
-          onToolEnd: (toolName, result) => {
-            // Update tracked tool calls
+          onToolEnd: (toolName, result, uiSchema) => {
+            // Update tracked tool calls with result and ui_schema
             finalToolCalls = finalToolCalls.map(t => 
               t.name === toolName && t.status === 'running'
-                ? { ...t, status: 'complete' as const, result }
+                ? { ...t, status: 'complete' as const, result, ui_schema: uiSchema }
                 : t
             )
             
@@ -797,7 +784,7 @@ export default function ChatPage() {
               // Update tool status in both top-level and segments
               const updateTool = (t: ToolCall) => 
                 t.name === toolName && t.status === 'running'
-                  ? { ...t, status: 'complete' as const, result }
+                  ? { ...t, status: 'complete' as const, result, ui_schema: uiSchema }
                   : t
               
               const updatedSegments = msg.segments?.map(seg => ({
@@ -875,6 +862,19 @@ export default function ChatPage() {
           
           onThreadId: (id) => {
             setThreadId(id)
+            receivedThreadId = id
+            
+            // Save user message immediately when we get the real thread ID
+            // This ensures persistence even if streaming fails afterward
+            if (!userMessageSaved) {
+              userMessageSaved = true
+              saveMessage({
+                threadId: id,
+                agentSlug,
+                role: 'user',
+                content: userMessageContent,
+              }).catch(err => console.warn('Failed to save user message:', err))
+            }
           },
           
           onError: (err) => {
@@ -908,13 +908,27 @@ export default function ChatPage() {
           : msg
       ))
       
-      if (result.threadId) {
-        setThreadId(result.threadId)
+      // Use thread ID from result or from callback (whichever we got)
+      const finalThreadId = result.threadId || receivedThreadId
+      
+      if (finalThreadId) {
+        setThreadId(finalThreadId)
         
-        // Save assistant message to backend after streaming completes
+        // Save user message if not already saved via onThreadId callback
+        if (!userMessageSaved) {
+          userMessageSaved = true
+          saveMessage({
+            threadId: finalThreadId,
+            agentSlug,
+            role: 'user',
+            content: userMessageContent,
+          }).catch(err => console.warn('Failed to save user message:', err))
+        }
+        
+        // Save assistant message after streaming completes
         if (finalAssistantContent) {
           saveMessage({
-            threadId: result.threadId,
+            threadId: finalThreadId,
             agentSlug,
             role: 'assistant',
             content: finalAssistantContent,
@@ -925,6 +939,18 @@ export default function ChatPage() {
     } catch (err) {
       console.error('Chat error:', err)
       setError(err instanceof Error ? err.message : 'Failed to send message')
+      
+      // Save user message even on early failures (e.g., network error before onThreadId fires)
+      // This ensures user messages aren't lost when streaming fails
+      if (!userMessageSaved) {
+        userMessageSaved = true
+        saveMessage({
+          threadId: currentThreadId,
+          agentSlug,
+          role: 'user',
+          content: userMessageContent,
+        }).catch(saveErr => console.warn('Failed to save user message on error:', saveErr))
+      }
     } finally {
       setIsStreaming(false)
     }

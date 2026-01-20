@@ -5,17 +5,147 @@ Provides the foundation for all Dooza tools with:
 - Metadata for categorization and permissions
 - Permission checking based on user context
 - Integration with LangChain tool system
+- Server-Driven UI schemas for frontend rendering
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Callable, ClassVar, Optional, Tuple, TYPE_CHECKING
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from langchain_core.tools import BaseTool
 
 if TYPE_CHECKING:
     from app.context.types import AgentContext
 
+
+# =============================================================================
+# UI SCHEMA TYPES
+# =============================================================================
+
+class UIDisplayType(str, Enum):
+    """
+    Display types for tool result rendering.
+    
+    The frontend has a generic renderer for each type.
+    Tools declare which display type best fits their output.
+    """
+    SCORE_CARD = "score_card"      # Circular gauge with score + summary
+    DATA_TABLE = "data_table"      # Rows and columns for tabular data
+    KEY_VALUE = "key_value"        # Label: value pairs for structured data
+    ISSUES_LIST = "issues_list"    # Prioritized list of issues/warnings
+    RAW = "raw"                    # Formatted JSON fallback
+
+
+@dataclass
+class FieldMapping:
+    """
+    Maps a JSON path in tool output to a display field.
+    
+    Attributes:
+        path: Dot-notation path to value (e.g., 'meta_tags.title')
+        label: Human-readable label for display
+        format: Optional format hint ('url', 'percent', 'number', 'date')
+    """
+    path: str
+    label: str
+    format: Optional[str] = None
+
+
+@dataclass
+class UISection:
+    """
+    A section within the tool result UI (for tabbed layouts).
+    
+    Attributes:
+        id: Unique section identifier
+        label: Tab/section label
+        icon: Lucide icon name (optional)
+        display: Display type for this section
+        fields: Fields to show in this section
+        score_field: JSON path to score (for score_card sections)
+    """
+    id: str
+    label: str
+    display: UIDisplayType
+    icon: Optional[str] = None
+    fields: List[FieldMapping] = field(default_factory=list)
+    score_field: Optional[str] = None
+
+
+@dataclass
+class ToolUISchema:
+    """
+    Server-Driven UI schema for tool result rendering.
+    
+    This schema travels with tool results to the frontend,
+    enabling automatic rich UI without hardcoded components.
+    
+    Attributes:
+        display: Primary display type
+        title: Card/section title
+        summary_template: Template string for summary (e.g., "Score: {overall_score}/100")
+        score_field: JSON path to primary score (for score_card)
+        fields: Field mappings for simple layouts
+        sections: Section definitions for tabbed layouts
+        expandable: Whether result should be collapsible (default True)
+    
+    Example:
+        ToolUISchema(
+            display=UIDisplayType.SCORE_CARD,
+            title="SEO Analysis",
+            summary_template="Score: {overall_score}/100 • {issues_count} issues",
+            score_field="overall_score",
+            fields=[
+                FieldMapping("meta_tags.title", "Title"),
+                FieldMapping("meta_tags.score", "Meta Score", "percent"),
+            ]
+        )
+    """
+    display: UIDisplayType
+    title: str
+    summary_template: Optional[str] = None
+    score_field: Optional[str] = None
+    fields: List[FieldMapping] = field(default_factory=list)
+    sections: List[UISection] = field(default_factory=list)
+    expandable: bool = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        result: Dict[str, Any] = {
+            "display": self.display.value,
+            "title": self.title,
+            "expandable": self.expandable,
+        }
+        
+        if self.summary_template:
+            result["summary_template"] = self.summary_template
+        if self.score_field:
+            result["score_field"] = self.score_field
+        if self.fields:
+            result["fields"] = [
+                {"path": f.path, "label": f.label, "format": f.format}
+                for f in self.fields
+            ]
+        if self.sections:
+            result["sections"] = [
+                {
+                    "id": s.id,
+                    "label": s.label,
+                    "display": s.display.value,
+                    "icon": s.icon,
+                    "fields": [{"path": f.path, "label": f.label, "format": f.format} for f in s.fields],
+                    "score_field": s.score_field,
+                }
+                for s in self.sections
+            ]
+        
+        return result
+
+
+# =============================================================================
+# TOOL METADATA
+# =============================================================================
 
 @dataclass
 class ToolMetadata:
@@ -29,6 +159,7 @@ class ToolMetadata:
         description: What the tool does
         requires_integration: Composio integration required (e.g., 'google_analytics') or None
         min_tier: Minimum user tier required ('free', 'pro', 'enterprise')
+        ui_schema: Server-Driven UI schema for frontend rendering (optional)
     """
     slug: str
     category: str
@@ -36,6 +167,7 @@ class ToolMetadata:
     description: str
     requires_integration: Optional[str] = None
     min_tier: str = "free"
+    ui_schema: Optional[ToolUISchema] = None
     
     def __post_init__(self):
         # Validate slug format
@@ -48,6 +180,10 @@ class ToolMetadata:
             raise ValueError(
                 f"Tool slug category '{slug_category}' doesn't match category '{self.category}'"
             )
+    
+    def get_ui_schema_dict(self) -> Optional[Dict[str, Any]]:
+        """Get UI schema as dictionary for JSON serialization."""
+        return self.ui_schema.to_dict() if self.ui_schema else None
 
 
 class DoozaTool(BaseTool):
@@ -115,6 +251,16 @@ class DoozaTool(BaseTool):
         """Get tool slug from metadata."""
         metadata = self._get_metadata()
         return metadata.slug if metadata else self.name
+    
+    def get_ui_schema(self) -> Optional[Dict[str, Any]]:
+        """
+        Get UI schema dictionary for frontend rendering.
+        
+        Returns:
+            UI schema dict or None if not defined
+        """
+        metadata = self._get_metadata()
+        return metadata.get_ui_schema_dict() if metadata else None
 
 
 def create_tool(
@@ -126,6 +272,7 @@ def create_tool(
     requires_integration: Optional[str] = None,
     min_tier: str = "free",
     args_schema: Any = None,
+    ui_schema: Optional[ToolUISchema] = None,
 ) -> DoozaTool:
     """
     Factory function to create a DoozaTool from a function.
@@ -141,6 +288,7 @@ def create_tool(
         requires_integration: Composio integration required or None
         min_tier: Minimum user tier
         args_schema: Pydantic model for arguments (optional)
+        ui_schema: Server-Driven UI schema for frontend rendering (optional)
     
     Returns:
         A configured DoozaTool instance
@@ -152,6 +300,7 @@ def create_tool(
         description=description,
         requires_integration=requires_integration,
         min_tier=min_tier,
+        ui_schema=ui_schema,
     )
     
     class FunctionTool(DoozaTool):

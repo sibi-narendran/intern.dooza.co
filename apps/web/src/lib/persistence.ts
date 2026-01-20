@@ -15,7 +15,7 @@
 export interface ToolCallSummary {
   name: string;
   args?: { url?: string };  // Only essential args
-  status: 'complete' | 'error';
+  status: 'pending' | 'running' | 'complete' | 'error';
   summary?: {
     score?: number;       // For SEO
     issueCount?: number;
@@ -66,9 +66,15 @@ export function compressToolCalls(toolCalls: Array<{
   status: string;
 }>): ToolCallSummary[] {
   return toolCalls.map(tool => {
+    // Preserve actual status - only map unknown statuses to 'error'
+    const validStatuses = ['pending', 'running', 'complete', 'error'] as const;
+    const status: ToolCallSummary['status'] = validStatuses.includes(tool.status as typeof validStatuses[number])
+      ? (tool.status as ToolCallSummary['status'])
+      : 'error';
+    
     const summary: ToolCallSummary = {
       name: tool.name,
-      status: tool.status === 'complete' ? 'complete' : 'error',
+      status,
     };
     
     // Only keep essential args (e.g., URL for SEO tools)

@@ -25,8 +25,55 @@ from pydantic import BaseModel
 
 from app.agents.seomi import create_seomi_supervisor
 from app.core.database import get_checkpointer
+from app.tools.registry import get_tool_registry
 
 logger = logging.getLogger(__name__)
+
+
+def _get_tool_ui_schema(tool_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up UI schema for a tool by name.
+    
+    Maps LangGraph tool names to registry slugs.
+    Convention: tool names use underscores, slugs use dots after category.
+    Examples:
+        'seo_analyze_url' -> 'seo.analyze_url'
+        'content_write_blog' -> 'content.write_blog'
+        'social_post_tweet' -> 'social.post_tweet'
+    
+    Args:
+        tool_name: The tool name from LangGraph event
+        
+    Returns:
+        UI schema dict or None if not found
+    """
+    registry = get_tool_registry()
+    
+    # Try to convert tool_name to slug format
+    # Pattern: {category}_{rest} -> {category}.{rest}
+    # e.g., 'seo_analyze_url' -> 'seo.analyze_url'
+    if '_' in tool_name:
+        parts = tool_name.split('_', 1)
+        if len(parts) == 2:
+            slug = f"{parts[0]}.{parts[1]}"
+            tool = registry.get_tool(slug)
+            if tool:
+                try:
+                    return tool.get_ui_schema()
+                except Exception as e:
+                    logger.warning(f"Error getting UI schema for {tool_name}: {e}")
+                    return None
+    
+    # Fallback: try direct lookup
+    tool = registry.get_tool(tool_name)
+    if tool:
+        try:
+            return tool.get_ui_schema()
+        except Exception as e:
+            logger.warning(f"Error getting UI schema for {tool_name}: {e}")
+            return None
+    
+    return None
 
 
 # =============================================================================
@@ -210,6 +257,10 @@ def setup_langgraph_routes(app: FastAPI):
                             # Truncate large string outputs
                             if isinstance(tool_output, str) and len(tool_output) > 5000:
                                 tool_output = tool_output[:5000] + "..."
+                            
+                            # Get UI schema for this tool (Server-Driven UI)
+                            ui_schema = _get_tool_ui_schema(tool_name)
+                            
                             clean_event = {
                                 "event": event_type,
                                 "name": tool_name,
@@ -218,6 +269,11 @@ def setup_langgraph_routes(app: FastAPI):
                                     "langgraph_node": metadata.get("langgraph_node", ""),
                                 },
                             }
+                            
+                            # Include UI schema if available
+                            if ui_schema:
+                                clean_event["ui_schema"] = ui_schema
+                                
                         yield f"data: {json.dumps(clean_event, default=str)}\n\n"
                     
                     # Skip verbose chain events, but pass through other useful events

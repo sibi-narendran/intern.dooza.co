@@ -52,10 +52,20 @@ export type ChatEventType =
 
 export interface ChatEvent {
   type: ChatEventType
+  /** For token events */
   content?: string
+  /** For tool events - tool name */
   tool?: string
+  name?: string  // LangGraph native field
+  /** For tool_start - input arguments */
   args?: Record<string, unknown>
+  input?: Record<string, unknown>  // LangGraph native field
+  /** For tool_end - output result */
   result?: unknown
+  output?: unknown  // LangGraph native field
+  /** Server-Driven UI schema for tool rendering */
+  ui_schema?: Record<string, unknown>
+  /** For delegation events */
   to_agent?: string
   from_agent?: string
   task?: string
@@ -64,6 +74,8 @@ export interface ChatEvent {
   error?: string
   metadata?: {
     category?: string
+    langgraph_node?: string
+    langgraph_step?: number
     [key: string]: unknown
   }
 }
@@ -91,12 +103,15 @@ export interface ToolCall {
   args?: Record<string, unknown>
   result?: unknown
   status: 'pending' | 'running' | 'complete' | 'error'
+  /** Server-Driven UI schema from backend */
+  ui_schema?: Record<string, unknown>
 }
 
 export interface ChatCallbacks {
   onToken?: (content: string, agent?: string) => void
   onToolStart?: (toolName: string, args?: Record<string, unknown>) => void
-  onToolEnd?: (toolName: string, result?: unknown) => void
+  /** Called when tool completes. ui_schema is the Server-Driven UI schema for rendering. */
+  onToolEnd?: (toolName: string, result?: unknown, uiSchema?: Record<string, unknown>) => void
   onToolData?: (toolData: ToolData) => void  // Full structured data for UI rendering
   onDelegate?: (toAgent: string) => void
   onAgentSwitch?: (agent: string) => void
@@ -296,29 +311,15 @@ export async function streamChat(
           else if (eventType === 'on_tool_end') {
             const toolName = event.name || ''
             const toolOutput = event.output
+            const uiSchema = event.ui_schema  // Server-Driven UI schema
             
             // Skip delegation tool outputs (internal)
             if (toolName.startsWith('transfer_to_')) {
               continue
             }
             
-            callbacks.onToolEnd?.(toolName, toolOutput)
-            
-            // Check if output contains SEO data for rich rendering
-            if (toolOutput) {
-              try {
-                const parsed = typeof toolOutput === 'string' ? JSON.parse(toolOutput) : toolOutput
-                if (parsed.overall_score !== undefined) {
-                  callbacks.onToolData?.({
-                    tool: toolName,
-                    data: parsed,
-                    category: 'seo',
-                  })
-                }
-              } catch {
-                // Not SEO JSON data
-              }
-            }
+            // Pass ui_schema along with result for rendering
+            callbacks.onToolEnd?.(toolName, toolOutput, uiSchema)
           }
           
           // Handle chain end (final output)
