@@ -67,6 +67,13 @@ AGENT_REGISTRATIONS: Dict[str, AgentRegistration] = {
         agent_type="supervisor",
         description="SEO Lead - supervises seo_tech, seo_content, seo_analytics",
     ),
+    "soshie": AgentRegistration(
+        slug="soshie",
+        module_path="app.agents.soshie",
+        factory_func="get_soshie_app",
+        agent_type="supervisor",
+        description="Social Media Lead - supervises social_content, social_design",
+    ),
     # Future agents: just add entries here
     # "penn": AgentRegistration(
     #     slug="penn",

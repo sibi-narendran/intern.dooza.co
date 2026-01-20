@@ -220,9 +220,35 @@ class ToolRegistry:
             except ImportError as e:
                 logger.warning(f"Could not load SEO tools: {e}")
             
+            # Import and register Social tools
+            try:
+                from app.tools.social import get_social_tools
+                social_tools = get_social_tools()
+                for tool in social_tools:
+                    try:
+                        self._register_internal(tool)
+                    except ValueError as e:
+                        logger.warning(f"Skipping social tool: {e}")
+                logger.info(f"Registered {len(social_tools)} social tools")
+            except ImportError as e:
+                logger.warning(f"Could not load social tools: {e}")
+            
+            # Import and register Image tools (when ready)
+            try:
+                from app.tools.image import get_image_tools
+                image_tools = get_image_tools()
+                for tool in image_tools:
+                    try:
+                        self._register_internal(tool)
+                    except ValueError as e:
+                        logger.warning(f"Skipping image tool: {e}")
+                if image_tools:
+                    logger.info(f"Registered {len(image_tools)} image tools")
+            except ImportError as e:
+                logger.warning(f"Could not load image tools: {e}")
+            
             # Future: Register other tool categories
             # from app.tools.content import get_content_tools
-            # from app.tools.social import get_social_tools
             
             self._initialized = True
             tool_count = sum(len(cat) for cat in self._tools.values())
