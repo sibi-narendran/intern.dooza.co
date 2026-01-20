@@ -1010,6 +1010,20 @@ export default function ChatPage() {
           />
         ))}
         
+        {/* Typing indicator at bottom while streaming */}
+        {isStreaming && (
+          <div style={{ 
+            display: 'flex', 
+            gap: '4px', 
+            padding: '12px 20px',
+            marginLeft: '48px', 
+          }}>
+            <span className="working-dot" style={{ animationDelay: '0ms' }} />
+            <span className="working-dot" style={{ animationDelay: '150ms' }} />
+            <span className="working-dot" style={{ animationDelay: '300ms' }} />
+          </div>
+        )}
+        
         <div ref={messagesEndRef} />
       </div>
       
