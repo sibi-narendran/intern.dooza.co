@@ -212,6 +212,7 @@ export async function streamChat(
   const decoder = new TextDecoder()
   let buffer = ''
   let currentAgent = 'agent' // Track which agent is currently active
+  let activeSpecialist = '' // Track which specialist was delegated to
   
   try {
     callbacks.onThreadId?.(generatedThreadId)
@@ -247,17 +248,22 @@ export async function streamChat(
           const metadata = event.metadata || {}
           const langgraphNode = metadata.langgraph_node || ''
           
+          // Map "model" to the actual specialist name
+          const effectiveAgent = langgraphNode === 'model' && activeSpecialist 
+            ? activeSpecialist 
+            : langgraphNode || 'agent'
+          
           // Track agent switches
-          if (langgraphNode && langgraphNode !== currentAgent) {
-            currentAgent = langgraphNode
-            callbacks.onAgentSwitch?.(langgraphNode)
+          if (effectiveAgent && effectiveAgent !== currentAgent) {
+            currentAgent = effectiveAgent
+            callbacks.onAgentSwitch?.(effectiveAgent)
           }
           
           // Handle token streaming from all agents
           if (eventType === 'on_chat_model_stream') {
             const content = event.content || ''
             if (content) {
-              callbacks.onToken?.(content, langgraphNode)
+              callbacks.onToken?.(content, effectiveAgent)
             }
           }
           
@@ -269,6 +275,7 @@ export async function streamChat(
             // Check for delegation (transfer_to_* tools)
             if (toolName.startsWith('transfer_to_')) {
               const targetAgent = toolName.replace('transfer_to_', '')
+              activeSpecialist = targetAgent // Remember which specialist we're delegating to
               callbacks.onDelegate?.(targetAgent)
             } else {
               callbacks.onToolStart?.(toolName, toolInput)
@@ -306,7 +313,13 @@ export async function streamChat(
           
           // Handle chain end (final output)
           else if (eventType === 'on_chain_end' && event.name === 'LangGraph') {
+            activeSpecialist = '' // Reset specialist tracking
             callbacks.onEnd?.()
+          }
+          
+          // Reset specialist when returning to supervisor
+          else if (langgraphNode === 'agent' && activeSpecialist) {
+            activeSpecialist = ''
           }
           
           // Handle errors

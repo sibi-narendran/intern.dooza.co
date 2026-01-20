@@ -197,7 +197,17 @@ def setup_langgraph_routes(app: FastAPI):
                             }
                         else:  # on_tool_end
                             tool_output = tool_data.get("output", "")
-                            # Truncate large outputs
+                            # Extract content if it's a message object (ToolMessage)
+                            if hasattr(tool_output, 'content'):
+                                tool_output = tool_output.content
+                            # Try to parse JSON content for cleaner output
+                            if isinstance(tool_output, str):
+                                try:
+                                    import json as json_lib
+                                    tool_output = json_lib.loads(tool_output)
+                                except (json_lib.JSONDecodeError, ValueError):
+                                    pass  # Keep as string if not valid JSON
+                            # Truncate large string outputs
                             if isinstance(tool_output, str) and len(tool_output) > 5000:
                                 tool_output = tool_output[:5000] + "..."
                             clean_event = {

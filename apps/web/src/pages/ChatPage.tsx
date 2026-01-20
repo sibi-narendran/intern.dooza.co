@@ -11,7 +11,6 @@ import {
   ArrowLeft, 
   Send, 
   Loader2, 
-  Wrench, 
   CheckCircle2,
   AlertCircle,
   Bot,
@@ -24,8 +23,6 @@ import { getAgentDetails, GalleryAgent } from '../lib/agent-api'
 import { 
   streamChat, 
   generateMessageId, 
-  formatToolName,
-  formatAgentName,
   Message,
   ToolCall,
   ToolData
@@ -47,6 +44,7 @@ interface Delegation {
 interface TextSegment {
   agent: string  // 'agent' = orchestrator, 'seo_tech', 'seo_content', etc.
   text: string
+  tools?: ToolCall[]  // Tools called during this segment
 }
 
 interface ChatMessage extends Message {
@@ -61,150 +59,170 @@ interface ChatMessage extends Message {
 // Components
 // ============================================================================
 
-function ToolIndicator({ tool }: { tool: ToolCall }) {
-  const statusConfig = {
-    pending: { 
-      icon: <Loader2 className="animate-spin" size={16} />,
-      text: 'Preparing...',
-      bgClass: '',
-    },
-    running: { 
-      icon: <Loader2 className="animate-spin" size={16} />,
-      text: 'Analyzing...',
-      bgClass: '',
-    },
-    complete: { 
-      icon: <CheckCircle2 size={16} style={{ color: '#16a34a' }} />,
-      text: 'Complete',
-      bgClass: 'tool-execution--complete',
-    },
-    error: { 
-      icon: <AlertCircle size={16} style={{ color: '#dc2626' }} />,
-      text: 'Failed',
-      bgClass: 'tool-execution--error',
-    },
+/** Industry-standard collapsible tool indicator with rich SEO card */
+/** Format tool names for user-friendly display */
+function formatToolNameForUser(name: string): string {
+  const mapping: Record<string, string> = {
+    'seo_analyze_url': 'Analyzing URL',
+    'seo_audit_meta_tags': 'Checking meta tags',
+    'seo_analyze_headings': 'Analyzing headings',
+    'seo_check_images': 'Checking images',
+    'seo_extract_keywords': 'Extracting keywords',
   }
-  
-  const status = statusConfig[tool.status]
-  
-  // Get tool description based on name
-  const getToolDescription = (name: string) => {
-    const descriptions: Record<string, string> = {
-      'seo_analyze_url': 'Running comprehensive SEO audit',
-      'seo_audit_meta_tags': 'Checking meta tags and Open Graph',
-      'seo_analyze_headings': 'Analyzing heading structure (H1-H6)',
-      'seo_check_images': 'Auditing image alt tags',
-      'seo_extract_keywords': 'Extracting top keywords',
-    }
-    return descriptions[name] || 'Processing...'
-  }
-  
-  // Get URL from args if available
-  const url = tool.args?.url as string | undefined
-  
-  return (
-    <div className={`tool-execution ${status.bgClass}`} style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      padding: '12px 16px',
-      background: 'linear-gradient(135deg, var(--gray-50), white)',
-      border: '1px solid var(--gray-200)',
-      borderRadius: '12px',
-      marginBottom: '12px',
-    }}>
-      <div style={{
-        width: '36px',
-        height: '36px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: tool.status === 'complete' ? '#dcfce7' : 
-                   tool.status === 'error' ? '#fef2f2' : 'var(--primary-100)',
-        color: tool.status === 'complete' ? '#16a34a' : 
-               tool.status === 'error' ? '#dc2626' : 'var(--primary-600)',
-        borderRadius: '10px',
-        flexShrink: 0,
-      }}>
-        <Wrench size={18} />
-      </div>
-      
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: '14px',
-          fontWeight: 600,
-          color: 'var(--gray-800)',
-        }}>
-          {formatToolName(tool.name)}
-        </div>
-        <div style={{
-          fontSize: '12px',
-          color: 'var(--gray-500)',
-          marginTop: '2px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        }}>
-          {tool.status === 'running' || tool.status === 'pending' ? (
-            getToolDescription(tool.name)
-          ) : url ? (
-            <span style={{ 
-              overflow: 'hidden', 
-              textOverflow: 'ellipsis', 
-              whiteSpace: 'nowrap',
-              maxWidth: '200px',
-            }}>
-              {url}
-            </span>
-          ) : (
-            status.text
-          )}
-        </div>
-      </div>
-      
-      {status.icon}
-    </div>
-  )
+  // Use mapping if available, otherwise format the name nicely
+  return mapping[name] || name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-/** Agent label badge - shows which agent is speaking */
-function AgentBadge({ agent, isActive = false }: { agent: string; isActive?: boolean }) {
-  const config: Record<string, { name: string; color: string; icon: string }> = {
-    'agent': { name: 'SEOmi', color: '#8b5cf6', icon: '🎯' },
-    'seo_tech': { name: 'Technical', color: '#2563eb', icon: '🔧' },
-    'seo_content': { name: 'Content', color: '#059669', icon: '📝' },
-    'seo_analytics': { name: 'Analytics', color: '#7c3aed', icon: '📊' },
+/** User-friendly tool indicator with expandable results */
+function ToolIndicator({ tool }: { tool: ToolCall }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  const isComplete = tool.status === 'complete'
+  const isRunning = tool.status === 'running' || tool.status === 'pending'
+  const hasResult = tool.result !== undefined
+  
+  // Parse result once
+  const parsedResult = (() => {
+    if (!tool.result) return null
+    try {
+      return typeof tool.result === 'string' ? JSON.parse(tool.result) : tool.result
+    } catch {
+      return null
+    }
+  })()
+  
+  // Check if this is SEO data (has overall_score)
+  const isSEOResult = parsedResult && isSEOAnalysisResult(parsedResult)
+  
+  // Get result summary
+  const getResultSummary = () => {
+    if (!parsedResult) return null
+    if (parsedResult.overall_score !== undefined) {
+      return `Score: ${parsedResult.overall_score}/100 • ${parsedResult.issues_count || 0} issues`
+    }
+    if (parsedResult.success !== undefined) {
+      return parsedResult.success ? 'Success' : 'Failed'
+    }
+    return 'Completed'
   }
   
-  const { name, color, icon } = config[agent] || { name: formatAgentName(agent), color: '#6b7280', icon: '🤖' }
+  const url = tool.args?.url as string | undefined
+  const resultSummary = getResultSummary()
+  const friendlyName = formatToolNameForUser(tool.name)
   
   return (
     <div style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '6px',
-      padding: '4px 10px',
-      background: `${color}10`,
-      borderRadius: '6px',
+      background: '#f8fafc',
+      border: '1px solid #e2e8f0',
+      borderRadius: '8px',
       marginBottom: '8px',
+      overflow: 'hidden',
     }}>
-      <span style={{ fontSize: '12px' }}>{icon}</span>
-      <span style={{
-        fontSize: '12px',
-        fontWeight: 600,
-        color: color,
-        letterSpacing: '0.01em',
-      }}>
-        {name}
-      </span>
-      {isActive && (
-        <Loader2 size={10} className="animate-spin" style={{ color, marginLeft: '2px' }} />
+      {/* Header - always visible */}
+      <div 
+        onClick={() => hasResult && setIsExpanded(!isExpanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          padding: '10px 12px',
+          cursor: hasResult ? 'pointer' : 'default',
+          background: isExpanded ? '#f1f5f9' : 'transparent',
+        }}
+      >
+        {/* Expand icon */}
+        {hasResult && (
+          <span style={{ 
+            color: '#64748b', 
+            fontSize: '10px',
+            transition: 'transform 0.2s',
+            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+          }}>
+            ▶
+          </span>
+        )}
+        
+        {/* Status icon */}
+        {isRunning ? (
+          <Loader2 size={14} className="animate-spin" style={{ color: '#3b82f6' }} />
+        ) : isComplete ? (
+          <CheckCircle2 size={14} style={{ color: '#16a34a' }} />
+        ) : (
+          <AlertCircle size={14} style={{ color: '#dc2626' }} />
+        )}
+        
+        {/* Tool name - user friendly */}
+        <span style={{
+          fontSize: '13px',
+          color: '#334155',
+          fontWeight: 500,
+        }}>
+          {friendlyName}
+        </span>
+        
+        {/* URL - shown nicely */}
+        {url && (
+          <span style={{
+            fontSize: '12px',
+            color: '#64748b',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: 1,
+          }}>
+            ({url})
+          </span>
+        )}
+        
+        {/* Result summary */}
+        {resultSummary && !isExpanded && (
+          <span style={{
+            fontSize: '12px',
+            color: '#16a34a',
+            marginLeft: 'auto',
+            fontWeight: 500,
+          }}>
+            {resultSummary}
+          </span>
+        )}
+      </div>
+      
+      {/* Expanded content - SEO card OR raw JSON */}
+      {isExpanded && hasResult && (
+        <div style={{
+          borderTop: '1px solid #e2e8f0',
+          background: isSEOResult ? 'white' : '#f1f5f9',
+        }}>
+          {isSEOResult ? (
+            /* Rich SEO Analysis Card */
+            <div style={{ padding: '0' }}>
+              <SEOAnalysisCard data={parsedResult as SEOAnalysisResult} defaultExpanded={true} />
+            </div>
+          ) : (
+            /* Fallback: Raw JSON */
+            <div style={{ padding: '12px', maxHeight: '300px', overflow: 'auto' }}>
+              <pre style={{
+                fontSize: '11px',
+                fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+                color: '#475569',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                margin: 0,
+              }}>
+                {typeof tool.result === 'string' 
+                  ? tool.result 
+                  : JSON.stringify(tool.result, null, 2)
+                }
+              </pre>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
 }
 
-/** Renders a text segment from a specific agent */
+/** Renders a text segment from a specific agent with inline tools */
 function SegmentBlock({ 
   segment, 
   isStreaming = false,
@@ -214,29 +232,52 @@ function SegmentBlock({
   isStreaming?: boolean
   isLast?: boolean
 }) {
-  if (!segment.text.trim()) return null
+  const isOrchestrator = segment.agent === 'agent'
+  const hasTools = segment.tools && segment.tools.length > 0
+  
+  // For specialists: only show tools, hide text (orchestrator will summarize)
+  // For orchestrator: show text only (no badge needed for user-friendly UI)
+  const showText = isOrchestrator && segment.text.trim()
+  const hasContent = showText || hasTools
+  
+  if (!hasContent) return null
   
   return (
-    <div style={{ marginBottom: isLast ? 0 : '16px' }}>
-      <AgentBadge agent={segment.agent} isActive={isStreaming && isLast} />
-      <div style={{
-        fontSize: '15px',
-        lineHeight: '1.6',
-        color: 'var(--gray-800)',
-      }}>
-        <MarkdownRenderer content={segment.text} />
-        {isStreaming && isLast && (
-          <span style={{
-            display: 'inline-block',
-            width: '2px',
-            height: '16px',
-            background: 'var(--primary-600)',
-            marginLeft: '2px',
-            animation: 'blink 1s infinite',
-            verticalAlign: 'text-bottom',
-          }} />
-        )}
-      </div>
+    <div style={{ 
+      marginBottom: isLast ? 0 : '16px',
+    }}>
+      {/* Tool calls - show for specialists (no agent badge needed) */}
+      {hasTools && (
+        <div style={{ marginBottom: showText ? '12px' : '0' }}>
+          {segment.tools!.map((tool, idx) => (
+            <ToolIndicator key={`tool-${idx}`} tool={tool} />
+          ))}
+        </div>
+      )}
+      
+      {/* Text content - only for orchestrator */}
+      {showText && (
+        <div style={{
+          fontSize: '14px',
+          lineHeight: '1.7',
+          color: '#1e293b',
+          paddingLeft: '12px',
+          borderLeft: '2px solid #8b5cf640',
+        }}>
+          <MarkdownRenderer content={segment.text} />
+          {isStreaming && isLast && (
+            <span style={{
+              display: 'inline-block',
+              width: '2px',
+              height: '14px',
+              background: '#8b5cf6',
+              marginLeft: '2px',
+              animation: 'blink 1s infinite',
+              verticalAlign: 'text-bottom',
+            }} />
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -272,19 +313,9 @@ function WorkingIndicator({ agentName }: { agentName: string }) {
   )
 }
 
-/** Compact inline delegation indicator */
+/** Compact inline delegation indicator - Cursor style */
+/** User-friendly delegation indicator - no internal names exposed */
 function DelegationIndicator({ delegation }: { delegation: Delegation }) {
-  const agentConfig: Record<string, { color: string; icon: string; name: string }> = {
-    'seo_tech': { color: '#2563eb', icon: '🔧', name: 'Technical' },
-    'seo_content': { color: '#059669', icon: '📝', name: 'Content' },
-    'seo_analytics': { color: '#7c3aed', icon: '📊', name: 'Analytics' },
-  }
-  
-  const config = agentConfig[delegation.toAgent] || { 
-    color: '#6b7280', 
-    icon: '🤖', 
-    name: formatAgentName(delegation.toAgent) 
-  }
   const isActive = delegation.status === 'active'
   
   return (
@@ -292,38 +323,28 @@ function DelegationIndicator({ delegation }: { delegation: Delegation }) {
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
-      padding: '6px 0',
-      margin: '4px 0',
-      color: 'var(--gray-500)',
+      padding: '8px 12px',
+      margin: '8px 0',
+      background: isActive ? '#eff6ff' : '#f8fafc',
+      borderRadius: '8px',
+      border: `1px solid ${isActive ? '#bfdbfe' : '#e2e8f0'}`,
       fontSize: '13px',
     }}>
-      <div style={{
-        width: '20px',
-        height: '1px',
-        background: 'var(--gray-300)',
-      }} />
-      
       {isActive ? (
         <>
-          <Loader2 size={12} className="animate-spin" style={{ color: config.color }} />
-          <span style={{ color: config.color, fontWeight: 500 }}>
-            Calling {config.name}...
+          <Loader2 size={14} className="animate-spin" style={{ color: '#3b82f6' }} />
+          <span style={{ color: '#3b82f6', fontWeight: 500 }}>
+            Calling tool...
           </span>
         </>
       ) : (
         <>
-          <CheckCircle2 size={12} style={{ color: '#16a34a' }} />
-          <span style={{ color: 'var(--gray-600)' }}>
-            {config.name} complete
+          <CheckCircle2 size={14} style={{ color: '#16a34a' }} />
+          <span style={{ color: '#16a34a', fontWeight: 500 }}>
+            Tool completed
           </span>
         </>
       )}
-      
-      <div style={{
-        flex: 1,
-        height: '1px',
-        background: 'var(--gray-200)',
-      }} />
     </div>
   )
 }
@@ -412,17 +433,23 @@ function MessageBubble({
               <>
                 {message.segments.map((segment, idx) => {
                   const isLastSegment = idx === message.segments!.length - 1
-                  // Find delegation indicator that should appear before this segment
-                  const delegationBefore = message.delegations?.find(
-                    d => d.toAgent === segment.agent && segment.agent !== 'agent'
-                  )
+                  const prevSegment = idx > 0 ? message.segments![idx - 1] : null
+                  
+                  // Show delegation when switching FROM orchestrator TO specialist
+                  const showDelegation = prevSegment && 
+                    prevSegment.agent === 'agent' && 
+                    segment.agent !== 'agent'
+                  
+                  // Find the delegation for this specialist
+                  const delegation = message.delegations?.find(d => d.toAgent === segment.agent)
                   
                   return (
                     <div key={`segment-${idx}`}>
                       {/* Show delegation indicator when switching to specialist */}
-                      {delegationBefore && idx > 0 && (
-                        <DelegationIndicator delegation={delegationBefore} />
+                      {showDelegation && delegation && (
+                        <DelegationIndicator delegation={delegation} />
                       )}
+                      
                       <SegmentBlock 
                         segment={segment} 
                         isStreaming={message.isStreaming}
@@ -432,15 +459,20 @@ function MessageBubble({
                   )
                 })}
                 
-                {/* Active delegation indicator at end */}
-                {message.delegations?.filter(d => d.status === 'active').map((d, idx) => (
-                  <DelegationIndicator key={`active-${idx}`} delegation={d} />
-                ))}
+                {/* Active delegation at end - only if last segment is NOT the specialist yet */}
+                {message.isStreaming && (() => {
+                  const lastSegment = message.segments?.[message.segments.length - 1]
+                  const activeDelegation = message.delegations?.find(d => d.status === 'active')
+                  // Only show if there's an active delegation and last segment isn't the specialist's segment
+                  if (activeDelegation && lastSegment?.agent !== activeDelegation.toAgent) {
+                    return <DelegationIndicator key="active-wait" delegation={activeDelegation} />
+                  }
+                  return null
+                })()}
               </>
             ) : message.content ? (
-              /* Fallback: render content without segments */
+              /* Fallback: render content without segments (no agent badge for clean UI) */
               <div>
-                <AgentBadge agent={message.activeAgent || 'agent'} isActive={message.isStreaming} />
                 <div style={{ fontSize: '15px', lineHeight: '1.6', color: 'var(--gray-800)' }}>
                   <MarkdownRenderer content={message.content} />
                   {message.isStreaming && (
@@ -460,30 +492,19 @@ function MessageBubble({
                 {message.delegations?.map((delegation, idx) => (
                   <DelegationIndicator key={`delegation-${idx}`} delegation={delegation} />
                 ))}
+                
+                {/* Tool calls for fallback mode */}
+                {message.toolCalls && message.toolCalls.length > 0 && (
+                  <div style={{ marginTop: '12px' }}>
+                    {message.toolCalls.map((tool, i) => (
+                      <ToolIndicator key={i} tool={tool} />
+                    ))}
+                  </div>
+                )}
               </div>
             ) : null}
             
-            {/* Tool calls */}
-            {message.toolCalls && message.toolCalls.length > 0 && (
-              <div style={{ marginTop: '12px' }}>
-                {message.toolCalls.map((tool, idx) => (
-                  <ToolIndicator key={idx} tool={tool} />
-                ))}
-              </div>
-            )}
-            
-            {/* Structured tool data - SEO analysis cards */}
-            {message.toolData?.map((td, idx) => {
-              if (td.category === 'seo' && isSEOAnalysisResult(td.data)) {
-                return (
-                  <SEOAnalysisCard 
-                    key={`tool-data-${idx}`} 
-                    data={td.data as SEOAnalysisResult} 
-                  />
-                )
-              }
-              return null
-            })}
+            {/* Note: SEO cards now rendered inside ToolIndicator for cleaner UX */}
           </div>
         )}
       </div>
@@ -618,14 +639,16 @@ export default function ChatPage() {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               
               const currentAgent = agent || msg.activeAgent || 'agent'
-              const segments = msg.segments || [{ agent: 'agent', text: '' }]
+              const segments = msg.segments || []
               const lastSegment = segments[segments.length - 1]
               
-              // If same agent, append to current segment
-              if (lastSegment.agent === currentAgent) {
+              // CHRONOLOGICAL: Only append to last segment if SAME agent
+              // Otherwise create new segment - never merge with earlier segments
+              if (lastSegment && lastSegment.agent === currentAgent) {
+                // Append to current segment (preserve tools!)
                 const updatedSegments = [
                   ...segments.slice(0, -1),
-                  { agent: currentAgent, text: lastSegment.text + content }
+                  { ...lastSegment, text: lastSegment.text + content }
                 ]
                 return { 
                   ...msg, 
@@ -635,11 +658,8 @@ export default function ChatPage() {
                 }
               }
               
-              // Different agent - create new segment
-              const updatedSegments = [
-                ...segments,
-                { agent: currentAgent, text: content }
-              ]
+              // New agent or first segment - create new segment
+              const updatedSegments = [...segments, { agent: currentAgent, text: content }]
               return { 
                 ...msg, 
                 content: msg.content + content,
@@ -650,29 +670,75 @@ export default function ChatPage() {
           },
           
           onToolStart: (toolName, args) => {
-            setMessages(prev => prev.map((msg, idx) => 
-              idx === prev.length - 1 && msg.role === 'assistant'
-                ? { 
-                    ...msg, 
-                    toolCalls: [...(msg.toolCalls || []), { name: toolName, args, status: 'running' as const }]
-                  }
-                : msg
-            ))
+            setMessages(prev => prev.map((msg, idx) => {
+              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
+              
+              const newTool = { name: toolName, args, status: 'running' as const }
+              const segments = msg.segments || []
+              
+              // Find the specialist - use multiple fallbacks for robustness
+              // 1. Active delegation
+              // 2. Any delegation (including complete - for timing issues)
+              // 3. activeAgent (if not orchestrator)
+              // 4. Last non-orchestrator segment
+              const activeDelegation = msg.delegations?.find(d => d.status === 'active')
+              const anyDelegation = msg.delegations?.[msg.delegations.length - 1] // Last delegation
+              const specialistAgent = activeDelegation?.toAgent 
+                || anyDelegation?.toAgent
+                || (msg.activeAgent && msg.activeAgent !== 'agent' ? msg.activeAgent : null)
+                || segments.slice().reverse().find(s => s.agent !== 'agent')?.agent
+              
+              let updatedSegments = [...segments]
+              
+              if (specialistAgent) {
+                // Find or create segment for the specialist
+                const specialistIdx = segments.findIndex(seg => seg.agent === specialistAgent)
+                
+                if (specialistIdx !== -1) {
+                  // Add tool to specialist's segment
+                  updatedSegments = segments.map((seg, i) => 
+                    i === specialistIdx 
+                      ? { ...seg, tools: [...(seg.tools || []), newTool] }
+                      : seg
+                  )
+                } else {
+                  // Create segment for specialist with this tool
+                  updatedSegments.push({ agent: specialistAgent, text: '', tools: [newTool] })
+                }
+              } else {
+                // No specialist found - create a tools segment
+                updatedSegments.push({ agent: 'tools', text: '', tools: [newTool] })
+              }
+              
+              return { 
+                ...msg, 
+                toolCalls: [...(msg.toolCalls || []), newTool],
+                segments: updatedSegments
+              }
+            }))
           },
           
           onToolEnd: (toolName, result) => {
-            setMessages(prev => prev.map((msg, idx) => 
-              idx === prev.length - 1 && msg.role === 'assistant' && msg.toolCalls
-                ? {
-                    ...msg,
-                    toolCalls: msg.toolCalls.map(t => 
-                      t.name === toolName && t.status === 'running'
-                        ? { ...t, status: 'complete' as const, result }
-                        : t
-                    )
-                  }
-                : msg
-            ))
+            setMessages(prev => prev.map((msg, idx) => {
+              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
+              
+              // Update tool status in both top-level and segments
+              const updateTool = (t: ToolCall) => 
+                t.name === toolName && t.status === 'running'
+                  ? { ...t, status: 'complete' as const, result }
+                  : t
+              
+              const updatedSegments = msg.segments?.map(seg => ({
+                ...seg,
+                tools: seg.tools?.map(updateTool)
+              }))
+              
+              return {
+                ...msg,
+                toolCalls: msg.toolCalls?.map(updateTool),
+                segments: updatedSegments
+              }
+            }))
           },
           
           onToolData: (toolData) => {
@@ -690,16 +756,30 @@ export default function ChatPage() {
           },
           
           onDelegate: (toAgent) => {
-            // Add delegation indicator
+            // Add delegation indicator AND create segment for the specialist
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               const existingDelegations = msg.delegations || []
-              const existing = existingDelegations.find(d => d.toAgent === toAgent)
-              if (existing) return msg
+              
+              // Robust deduplication - check for any existing delegation to this agent
+              const hasExisting = existingDelegations.some(d => d.toAgent === toAgent)
+              if (hasExisting) {
+                // Just update activeAgent if already delegated
+                return { ...msg, activeAgent: toAgent }
+              }
+              
+              // Create a new segment for the specialist (so tools go to the right place)
+              const segments = msg.segments || []
+              const hasSpecialistSegment = segments.some(s => s.agent === toAgent)
+              const updatedSegments = hasSpecialistSegment 
+                ? segments 
+                : [...segments, { agent: toAgent, text: '', tools: [] }]
+              
               return { 
                 ...msg, 
                 delegations: [...existingDelegations, { toAgent, status: 'active' as const }],
-                activeAgent: toAgent
+                activeAgent: toAgent,
+                segments: updatedSegments
               }
             }))
           },

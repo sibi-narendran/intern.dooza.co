@@ -134,12 +134,11 @@ def create_seomi_supervisor(
     
     # Create the supervisor workflow
     # This automatically creates handoff tools for transferring to specialists
+    # Note: No output_mode - we need full event streaming for tool visibility
     workflow = create_supervisor(
         agents=[seo_tech, seo_content, seo_analytics],
         model=model,
         prompt=SEOMI_SYSTEM_PROMPT,
-        # Only show SEOmi's final response, not specialist internal messages
-        output_mode="last_message",
     )
     
     # Compile with optional checkpointer

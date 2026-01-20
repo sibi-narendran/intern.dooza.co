@@ -1,7 +1,7 @@
 """
 SEO Analytics Specialist Agent
 
-Uses LangGraph's create_react_agent for standard ReAct pattern.
+Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent pattern.
 This agent handles analytics and data-focused SEO tasks.
 
 Note: Tools are under development. Requires GSC/GA integrations.
@@ -59,7 +59,7 @@ When asked to perform a task, I will:
 
 def create_seo_analytics_agent(model: ChatOpenAI | None = None):
     """
-    Create the seo-analytics specialist agent using LangGraph's create_react_agent.
+    Create the seo-analytics specialist agent using create_agent from langchain.agents.
     
     Note: Currently has no tools - requires integrations.
     

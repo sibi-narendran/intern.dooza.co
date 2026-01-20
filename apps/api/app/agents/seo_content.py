@@ -1,7 +1,7 @@
 """
 SEO Content Specialist Agent
 
-Uses LangGraph's create_react_agent for standard ReAct pattern.
+Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent pattern.
 This agent handles content-focused SEO tasks.
 
 Note: Tools are under development. Agent currently provides guidance only.
@@ -58,7 +58,7 @@ When asked to perform a task, I will:
 
 def create_seo_content_agent(model: ChatOpenAI | None = None):
     """
-    Create the seo-content specialist agent using LangGraph's create_react_agent.
+    Create the seo-content specialist agent using create_agent from langchain.agents.
     
     Note: Currently has no tools - under development.
     

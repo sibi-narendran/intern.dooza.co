@@ -53,34 +53,6 @@ function ScoreBadge({ score }: { score: number }) {
   )
 }
 
-// Priority badge component
-function PriorityBadge({ priority }: { priority: 'high' | 'medium' | 'low' }) {
-  const colors = {
-    high: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' },
-    medium: { bg: '#fffbeb', text: '#d97706', border: '#fde68a' },
-    low: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
-  }
-  
-  const c = colors[priority]
-  
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 8px',
-      borderRadius: '4px',
-      background: c.bg,
-      color: c.text,
-      fontSize: '11px',
-      fontWeight: 600,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-      border: `1px solid ${c.border}`,
-    }}>
-      {priority}
-    </span>
-  )
-}
-
 // Custom components for markdown rendering
 const markdownComponents: Components = {
   // Headings with proper visual hierarchy
@@ -108,16 +80,7 @@ const markdownComponents: Components = {
       color: 'var(--gray-800)',
       marginTop: '20px',
       marginBottom: '12px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
     }}>
-      <span style={{
-        width: '4px',
-        height: '18px',
-        background: 'var(--primary-500)',
-        borderRadius: '2px',
-      }} />
       {children}
     </h2>
   ),
@@ -135,38 +98,11 @@ const markdownComponents: Components = {
   ),
   
   // Paragraphs
-  p: ({ children }) => {
-    const text = String(children)
-    
-    // Check for priority indicators
-    if (text.toLowerCase().includes('high priority')) {
-      return (
-        <p style={{ margin: '12px 0', lineHeight: 1.6 }}>
-          <PriorityBadge priority="high" /> {children}
-        </p>
-      )
-    }
-    if (text.toLowerCase().includes('medium priority')) {
-      return (
-        <p style={{ margin: '12px 0', lineHeight: 1.6 }}>
-          <PriorityBadge priority="medium" /> {children}
-        </p>
-      )
-    }
-    if (text.toLowerCase().includes('low priority')) {
-      return (
-        <p style={{ margin: '12px 0', lineHeight: 1.6 }}>
-          <PriorityBadge priority="low" /> {children}
-        </p>
-      )
-    }
-    
-    return (
-      <p style={{ margin: '12px 0', lineHeight: 1.6 }}>
-        {children}
-      </p>
-    )
-  },
+  p: ({ children }) => (
+    <p style={{ margin: '12px 0', lineHeight: 1.6 }}>
+      {children}
+    </p>
+  ),
   
   // Strong/Bold text - detect scores
   strong: ({ children }) => {
@@ -219,8 +155,8 @@ const markdownComponents: Components = {
   ul: ({ children }) => (
     <ul style={{
       margin: '12px 0',
-      paddingLeft: '0',
-      listStyle: 'none',
+      paddingLeft: '20px',
+      listStyle: 'disc',
     }}>
       {children}
     </ul>
@@ -229,51 +165,22 @@ const markdownComponents: Components = {
   ol: ({ children }) => (
     <ol style={{
       margin: '12px 0',
-      paddingLeft: '24px',
+      paddingLeft: '20px',
       listStylePosition: 'outside',
     }}>
       {children}
     </ol>
   ),
   
-  li: ({ children }) => {
-    const text = String(children)
-    
-    // Detect issue items (usually start with indicator)
-    const isIssue = text.includes('Missing') || 
-                    text.includes('issue') || 
-                    text.includes('error') ||
-                    text.includes('Warning')
-    
-    const isSuccess = text.includes('✓') || 
-                      text.includes('Good') || 
-                      text.includes('Excellent') ||
-                      text.includes('optimized')
-    
-    return (
-      <li style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '10px',
-        padding: '8px 12px',
-        marginBottom: '6px',
-        background: isIssue ? '#fef2f2' : isSuccess ? '#f0fdf4' : 'var(--gray-50)',
-        borderRadius: '8px',
-        borderLeft: `3px solid ${isIssue ? '#ef4444' : isSuccess ? '#22c55e' : 'var(--gray-300)'}`,
-        lineHeight: 1.5,
-      }}>
-        <span style={{
-          flexShrink: 0,
-          width: '6px',
-          height: '6px',
-          marginTop: '8px',
-          borderRadius: '50%',
-          background: isIssue ? '#ef4444' : isSuccess ? '#22c55e' : 'var(--gray-400)',
-        }} />
-        <span style={{ flex: 1 }}>{children}</span>
-      </li>
-    )
-  },
+  li: ({ children }) => (
+    <li style={{
+      marginBottom: '6px',
+      lineHeight: 1.6,
+      color: 'var(--gray-700)',
+    }}>
+      {children}
+    </li>
+  ),
   
   // Code blocks (for technical SEO info)
   code: ({ className, children }) => {

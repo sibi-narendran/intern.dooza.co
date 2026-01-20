@@ -1,7 +1,7 @@
 """
 SEO Technical Specialist Agent
 
-Uses LangGraph's create_react_agent for standard ReAct pattern.
+Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent pattern.
 This agent handles technical SEO analysis tasks.
 """
 
@@ -58,9 +58,9 @@ You have direct access to tools for analyzing websites.
 
 def create_seo_tech_agent(model: ChatOpenAI | None = None):
     """
-    Create the seo-tech specialist agent using LangGraph's create_react_agent.
+    Create the seo-tech specialist agent using create_agent from langchain.agents.
     
-    This is the standard LangGraph pattern for tool-using agents.
+    This is the standard LangGraph v1.0+ pattern for tool-using agents.
     
     Args:
         model: Optional ChatOpenAI instance. If not provided, uses default.
