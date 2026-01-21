@@ -21,10 +21,23 @@ from app.agents.seomi import (
     SEOMI_CONFIG,
 )
 
-# Specialists (for direct testing/use)
+# SEO Specialists (for direct testing/use)
 from app.agents.seo_tech import create_seo_tech_agent
 from app.agents.seo_content import create_seo_content_agent
 from app.agents.seo_analytics import create_seo_analytics_agent
+
+# Soshie Supervisor
+from app.agents.soshie import (
+    create_soshie_supervisor,
+    get_soshie_app,
+    SOSHIE_CONFIG,
+)
+
+# Soshie Specialists
+from app.agents.social_content import create_social_content_agent
+from app.agents.social_design import create_social_design_agent
+from app.agents.social_research import create_social_research_agent
+from app.agents.social_publisher import create_social_publisher_agent
 
 # Factory utilities
 from app.agents.factory import (
@@ -61,15 +74,26 @@ from app.agents.base import get_llm, create_base_agent
 
 
 __all__ = [
-    # Supervisor
+    # SEOmi Supervisor
     "create_seomi_supervisor",
     "get_seomi_app",
     "SEOMI_CONFIG",
     
-    # Specialists
+    # SEO Specialists
     "create_seo_tech_agent",
     "create_seo_content_agent",
     "create_seo_analytics_agent",
+    
+    # Soshie Supervisor
+    "create_soshie_supervisor",
+    "get_soshie_app",
+    "SOSHIE_CONFIG",
+    
+    # Soshie Specialists
+    "create_social_content_agent",
+    "create_social_design_agent",
+    "create_social_research_agent",
+    "create_social_publisher_agent",
     
     # Factory
     "get_agent",

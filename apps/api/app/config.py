@@ -22,11 +22,11 @@ class Settings(BaseSettings):
     
     # OpenRouter (multi-provider gateway)
     openrouter_api_key: str = ""
-    openrouter_model: str = "google/gemini-2.5-flash"
+    openrouter_model: str = "google/gemini-3-flash-preview"
     
-    # Google Gemini Direct
+    # Google Gemini Direct (v3 requires langchain-google-genai for thoughtSignature support)
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     
     # Supabase
     supabase_url: str

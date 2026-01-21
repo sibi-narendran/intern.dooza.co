@@ -6,6 +6,7 @@ python-multipart>=0.0.9
 # LangChain + LangGraph (standard pattern - no LangServe needed)
 langchain>=0.3.7
 langchain-openai>=0.2.6
+langchain-google-genai>=4.0.0
 langgraph>=0.2.53
 langgraph-checkpoint-postgres>=2.0.6
 langgraph-supervisor>=0.0.9
@@ -27,8 +28,13 @@ httpx>=0.27.2
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 
-# Integrations (future)
+# Integrations
 composio-core>=0.5.0
+
+# Scheduler (for publish pipeline)
+apscheduler>=3.10.4
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
 
 # Dev
 python-dotenv>=1.0.1

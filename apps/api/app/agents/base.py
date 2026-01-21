@@ -38,21 +38,25 @@ class AgentState(TypedDict):
 # LLM FACTORY
 # =============================================================================
 
-def get_llm(streaming: bool = True, model: Optional[str] = None) -> ChatOpenAI:
+def get_llm(streaming: bool = True, model: Optional[str] = None) -> Any:
     """
     Create LLM instance based on configured provider.
     
     Supports:
-    - OpenAI (recommended)
-    - OpenRouter (multi-provider gateway)
-    - Gemini (Google AI)
+    - openai: OpenAI direct API (recommended for best compatibility)
+    - openrouter: Multi-provider gateway (supports Gemini, Claude, etc.)
+    - gemini: Google AI direct (streaming disabled due to SDK bug)
     
     Args:
-        streaming: Whether to enable streaming
-        model: Optional model override
+        streaming: Whether to enable streaming (ignored for Gemini direct)
+        model: Optional model override (defaults to provider's configured model)
         
     Returns:
-        Configured LLM instance
+        Configured LLM instance (ChatOpenAI or ChatGoogleGenerativeAI)
+        
+    Raises:
+        ValueError: If LLM_PROVIDER is not one of: openai, openrouter, gemini
+        ImportError: If Gemini provider selected but langchain-google-genai not installed
     """
     settings = get_settings()
     provider = settings.llm_provider
@@ -71,18 +75,26 @@ def get_llm(streaming: bool = True, model: Optional[str] = None) -> ChatOpenAI:
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
         except ImportError:
-            raise ImportError("Install langchain-google-genai: pip install langchain-google-genai")
+            raise ImportError("Install langchain-google-genai>=4.0.0: pip install langchain-google-genai")
         
         model_name = model or settings.gemini_model
         logger.debug(f"Creating Gemini LLM: {model_name}")
         
+        # Gemini 3 models require include_thoughts=True for proper thoughtSignature handling
+        # This is required for tool calling workflows to work correctly
+        is_gemini_3 = "gemini-3" in model_name
+        
+        # NOTE: Streaming disabled due to bug in google-genai SDK v1.59.0
+        # Error: 'ClientResponse' object is not subscriptable in _api_client.py
+        # Re-enable when SDK is fixed
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=settings.gemini_api_key,
-            streaming=streaming,
+            streaming=False,  # Disabled: google-genai streaming bug
+            include_thoughts=is_gemini_3,
         )
     
-    else:  # openrouter (default fallback)
+    elif provider == "openrouter":
         model_name = model or settings.openrouter_model
         logger.debug(f"Creating OpenRouter LLM: {model_name}")
         
@@ -95,6 +107,14 @@ def get_llm(streaming: bool = True, model: Optional[str] = None) -> ChatOpenAI:
                 "X-Title": "Dooza AI",
             },
             streaming=streaming,
+        )
+    
+    else:
+        # Fail fast on invalid provider - don't silently use wrong config
+        valid_providers = ["openai", "openrouter", "gemini"]
+        raise ValueError(
+            f"Invalid LLM_PROVIDER: '{provider}'. "
+            f"Must be one of: {', '.join(valid_providers)}"
         )
 
 

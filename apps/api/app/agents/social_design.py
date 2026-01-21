@@ -7,10 +7,9 @@ This agent handles visual content creation tasks.
 Note: Image generation tools are under development. Agent currently provides guidance only.
 """
 
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 
-from app.config import get_settings
+from app.agents.base import get_llm
 from app.tools.image import get_image_tools
 
 
@@ -87,7 +86,7 @@ When asked to perform a task, I will:
 # AGENT FACTORY
 # =============================================================================
 
-def create_social_design_agent(model: ChatOpenAI | None = None):
+def create_social_design_agent(model=None):
     """
     Create the social_design specialist agent using create_agent from langchain.agents.
     
@@ -95,19 +94,14 @@ def create_social_design_agent(model: ChatOpenAI | None = None):
     Image generation tools will be added once Replicate/Flux integration is ready.
     
     Args:
-        model: Optional ChatOpenAI instance. If not provided, uses default.
+        model: Optional LLM instance. If not provided, uses configured provider.
         
     Returns:
         A compiled LangGraph agent ready for invocation.
     """
     if model is None:
-        settings = get_settings()
-        model = ChatOpenAI(
-            api_key=settings.openai_api_key,
-            model=settings.openai_model or "gpt-4o-mini",
-            temperature=0.5,
-            streaming=True,
-        )
+        # Use centralized LLM factory - supports OpenAI, Gemini 3, OpenRouter
+        model = get_llm(streaming=True)
     
     # No tools yet - under development
     # Will integrate with Replicate/Flux for image generation

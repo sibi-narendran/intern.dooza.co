@@ -1,111 +1,59 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Puzzle, Brain, Users } from 'lucide-react';
+import { Home, Puzzle, Brain, Users, Settings } from 'lucide-react';
 import logo from '../assets/logo.png';
-import UserMenu from './UserMenu';
+import UserMenuCompact from './UserMenuCompact';
 
+/**
+ * Collapsed icon-only sidebar (60px width)
+ * Shows navigation icons with tooltips on hover
+ */
 const Sidebar = () => {
     const location = useLocation();
 
     const isActive = (path) => location.pathname === path;
     const isActivePrefix = (prefix) => location.pathname.startsWith(prefix);
 
+    const navItems = [
+        { path: '/', icon: Home, label: 'Home', exact: true },
+        { path: '/integrations', icon: Puzzle, label: 'Integrations' },
+        { path: '/knowledge', icon: Brain, label: 'Knowledge Base' },
+        { path: '/gallery', icon: Users, label: 'Workforce Gallery' },
+    ];
+
     return (
-        <aside className="app-shell__sidebar" style={{ padding: '20px', display: 'flex', flexDirection: 'column' }}>
-            {/* Brand */}
-            <div style={{ marginBottom: '32px', paddingLeft: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <img src={logo} alt="Dooza Logo" style={{ width: '28px', height: '28px' }} />
-                <span style={{ fontWeight: '700', fontSize: '18px' }}>Dooza <span style={{ color: 'var(--primary-600)' }}>Workforce</span></span>
-            </div>
+        <aside className="sidebar-collapsed">
+            {/* Logo */}
+            <Link to="/" className="sidebar-collapsed__logo" title="Dooza Workforce">
+                <img src={logo} alt="Dooza" />
+            </Link>
 
-            {/* Main Nav */}
-            <nav style={{ flex: 1, overflowY: 'auto' }}>
-                <p style={{ 
-                    fontSize: '11px', 
-                    fontWeight: '700', 
-                    color: 'var(--gray-500)', 
-                    marginBottom: '12px', 
-                    paddingLeft: '8px', 
-                    letterSpacing: '0.05em' 
-                }}>
-                    WORKSPACE
-                </p>
-
-                <Link to="/" style={{
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px',
-                    padding: '8px 12px', 
-                    borderRadius: '8px', 
-                    textDecoration: 'none',
-                    marginBottom: '4px',
-                    background: isActive('/') ? 'white' : 'transparent',
-                    color: isActive('/') ? 'var(--primary-700)' : 'var(--gray-600)',
-                    boxShadow: isActive('/') ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                    fontWeight: isActive('/') ? '600' : '500',
-                    transition: 'all 0.1s'
-                }}>
-                    <LayoutGrid size={18} />
-                    <span>Dashboard</span>
-                </Link>
-
-                <Link to="/integrations" style={{
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px',
-                    padding: '8px 12px', 
-                    borderRadius: '8px', 
-                    textDecoration: 'none',
-                    marginBottom: '4px',
-                    background: isActivePrefix('/integrations') ? 'white' : 'transparent',
-                    color: isActivePrefix('/integrations') ? 'var(--primary-700)' : 'var(--gray-600)',
-                    boxShadow: isActivePrefix('/integrations') ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                    fontWeight: isActivePrefix('/integrations') ? '600' : '500',
-                    transition: 'all 0.1s'
-                }}>
-                    <Puzzle size={18} />
-                    <span>Integrations</span>
-                </Link>
-
-                <Link to="/knowledge" style={{
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px',
-                    padding: '8px 12px', 
-                    borderRadius: '8px', 
-                    textDecoration: 'none',
-                    marginBottom: '4px',
-                    background: isActivePrefix('/knowledge') ? 'white' : 'transparent',
-                    color: isActivePrefix('/knowledge') ? 'var(--primary-700)' : 'var(--gray-600)',
-                    boxShadow: isActivePrefix('/knowledge') ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                    fontWeight: isActivePrefix('/knowledge') ? '600' : '500',
-                    transition: 'all 0.1s'
-                }}>
-                    <Brain size={18} />
-                    <span>Knowledge Base</span>
-                </Link>
-
-                <Link to="/gallery" style={{
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px',
-                    padding: '8px 12px', 
-                    borderRadius: '8px', 
-                    textDecoration: 'none',
-                    marginBottom: '4px',
-                    background: isActivePrefix('/gallery') ? 'white' : 'transparent',
-                    color: isActivePrefix('/gallery') ? 'var(--primary-700)' : 'var(--gray-600)',
-                    boxShadow: isActivePrefix('/gallery') ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                    fontWeight: isActivePrefix('/gallery') ? '600' : '500',
-                    transition: 'all 0.1s'
-                }}>
-                    <Users size={18} />
-                    <span>Workforce Gallery</span>
-                </Link>
+            {/* Navigation */}
+            <nav className="sidebar-collapsed__nav">
+                {navItems.map(({ path, icon: Icon, label, exact }) => {
+                    const active = exact ? isActive(path) : isActivePrefix(path);
+                    return (
+                        <Link
+                            key={path}
+                            to={path}
+                            className={`sidebar-collapsed__item ${active ? 'sidebar-collapsed__item--active' : ''}`}
+                            title={label}
+                        >
+                            <Icon size={20} />
+                        </Link>
+                    );
+                })}
             </nav>
 
-            {/* User Menu - auto pushed to bottom via CSS margin-top: auto */}
-            <div className="sidebar__user-section">
-                <UserMenu />
+            {/* Bottom section */}
+            <div className="sidebar-collapsed__bottom">
+                <Link
+                    to="/settings"
+                    className={`sidebar-collapsed__item ${isActivePrefix('/settings') ? 'sidebar-collapsed__item--active' : ''}`}
+                    title="Settings"
+                >
+                    <Settings size={20} />
+                </Link>
+                <UserMenuCompact />
             </div>
         </aside>
     );

@@ -6,15 +6,16 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { 
-  ArrowLeft,
   Send, 
   Loader2, 
   CheckCircle2,
   AlertCircle,
   Bot,
-  User
+  User,
+  Paperclip,
+  Mic
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getAgentDetails, GalleryAgent } from '../lib/agent-api'
@@ -31,12 +32,14 @@ import {
   type SavedMessage,
 } from '../lib/chat-api'
 import { getQueuedMessageCount } from '../lib/persistence'
-import ChatHistoryDropdown from '../components/ChatHistoryDropdown'
+import AgentPanel from '../components/AgentPanel'
 import MarkdownRenderer from '../components/MarkdownRenderer'
 import { DynamicToolRenderer } from '../components/tools'
 import { ToolUISchema, formatSummary } from '../types/tool-ui'
 import WelcomeScreen from '../components/WelcomeScreen'
 import { formatToolName } from '../config/tool-display-names'
+import TaskCreatedCard from '../components/workspace/TaskCreatedCard'
+import { WorkspaceEmbed } from '../components/workspace'
 
 // ============================================================================
 // Types
@@ -202,6 +205,16 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
           />
         </div>
       )}
+      
+      {/* Special card for create_task tool - always show when complete */}
+      {tool.name === 'create_task' && isComplete && parsedResult && (
+        <div style={{
+          borderTop: '1px solid #e2e8f0',
+          padding: '12px',
+        }}>
+          <TaskCreatedCard result={parsedResult} />
+        </div>
+      )}
     </div>
   )
 }
@@ -297,10 +310,19 @@ function WorkingIndicator({ agentName }: { agentName: string }) {
   )
 }
 
-/** Compact inline delegation indicator - Cursor style */
-/** User-friendly delegation indicator - no internal names exposed */
+/** Compact inline delegation indicator - shows which specialist is working */
 function DelegationIndicator({ delegation }: { delegation: Delegation }) {
   const isActive = delegation.status === 'active'
+  
+  // Format specialist name for display (e.g., "social_research" -> "Social Research")
+  const formatAgentName = (name: string) => {
+    return name
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+  }
+  
+  const specialistName = formatAgentName(delegation.toAgent)
   
   return (
     <div style={{
@@ -318,14 +340,14 @@ function DelegationIndicator({ delegation }: { delegation: Delegation }) {
         <>
           <Loader2 size={14} className="animate-spin" style={{ color: '#3b82f6' }} />
           <span style={{ color: '#3b82f6', fontWeight: 500 }}>
-            Calling tool...
+            {specialistName} working...
           </span>
         </>
       ) : (
         <>
           <CheckCircle2 size={14} style={{ color: '#16a34a' }} />
           <span style={{ color: '#16a34a', fontWeight: 500 }}>
-            Tool completed
+            {specialistName}
           </span>
         </>
       )}
@@ -417,20 +439,30 @@ function MessageBubble({
               <>
                 {message.segments.map((segment, idx) => {
                   const isLastSegment = idx === message.segments!.length - 1
-                  const prevSegment = idx > 0 ? message.segments![idx - 1] : null
                   
-                  // Show delegation when switching FROM orchestrator TO specialist
-                  const showDelegation = prevSegment && 
-                    prevSegment.agent === 'agent' && 
-                    segment.agent !== 'agent'
+                  // Find the delegation for this specialist (if any)
+                  const isSpecialist = segment.agent !== 'agent' && segment.agent !== 'tools'
+                  const delegation = isSpecialist 
+                    ? message.delegations?.find(d => d.toAgent === segment.agent)
+                    : undefined
                   
-                  // Find the delegation for this specialist
-                  const delegation = message.delegations?.find(d => d.toAgent === segment.agent)
+                  // Check segment content
+                  const hasTools = segment.tools && segment.tools.length > 0
+                  const hasOrchestratorText = segment.agent === 'agent' && segment.text.trim()
+                  const hasSpecialistContent = isSpecialist && (hasTools || segment.text.trim())
+                  
+                  // Show delegation indicator for ANY specialist segment that has content (text or tools)
+                  // Specialists may respond with just text (no tools) - we still want to show they worked
+                  const showDelegation = isSpecialist && delegation && hasSpecialistContent
+                  
+                  // Skip rendering completely empty segments
+                  // Orchestrator: needs text | Specialist: needs delegation with content | Tools: needs tools
+                  if (!hasOrchestratorText && !showDelegation && !hasTools) return null
                   
                   return (
                     <div key={`segment-${idx}`}>
-                      {/* Show delegation indicator when switching to specialist */}
-                      {showDelegation && delegation && (
+                      {/* Show delegation indicator when specialist has content */}
+                      {showDelegation && (
                         <DelegationIndicator delegation={delegation} />
                       )}
                       
@@ -517,7 +549,6 @@ function MessageBubble({
 
 export default function ChatPage() {
   const { agentSlug } = useParams<{ agentSlug: string }>()
-  const navigate = useNavigate()
   useAuth() // Ensure user is authenticated
   
   // Agent info
@@ -536,6 +567,9 @@ export default function ChatPage() {
   
   // Thread ID - always start fresh (cross-device via History dropdown)
   const [threadId, setThreadId] = useState<string | null>(null)
+  
+  // Workspace view toggle (for agents with workspace support like Soshie)
+  const [showWorkspace, setShowWorkspace] = useState(false)
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -990,179 +1024,203 @@ export default function ChatPage() {
     setMessages([])
     setThreadId(null)
     setError(null)
+    setShowWorkspace(false)
+  }, [])
+  
+  // Toggle workspace view
+  const handleWorkspaceToggle = useCallback(() => {
+    setShowWorkspace(prev => !prev)
   }, [])
   
   // Loading state
   if (loading) {
     return (
-      <div className="chat-page chat-page--loading">
-        <Loader2 size={32} className="animate-spin" style={{ color: 'var(--primary-600)' }} />
-        <span style={{ color: 'var(--gray-500)', fontSize: '14px' }}>
-          Loading conversation...
-        </span>
-      </div>
+      <>
+        <AgentPanel
+          agent={null}
+          agentSlug={agentSlug || ''}
+          currentThreadId={null}
+          onSelectThread={() => {}}
+          onNewChat={() => {}}
+          onWorkspaceToggle={() => {}}
+          showWorkspace={false}
+          isStreaming={false}
+        />
+        <div className="chat-layout__content">
+          <div className="chat-page chat-page--loading">
+            <Loader2 size={32} className="animate-spin" style={{ color: 'var(--primary-600)' }} />
+            <span style={{ color: 'var(--gray-500)', fontSize: '14px' }}>
+              Loading conversation...
+            </span>
+          </div>
+        </div>
+      </>
     )
   }
   
   return (
-    <div className="chat-page">
-      {/* Chat header - agent info and controls */}
-      <div className="chat-page__header">
-        <button
-          onClick={() => navigate('/')}
-          className="chat-page__back-btn"
-          title="Back to Dashboard"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        
-        {agent && (
-          <div className="chat-page__agent-info">
-            <div 
-              className="chat-page__agent-avatar"
-              style={{ background: agent.gradient || 'var(--primary-600)' }}
-            >
-              {agent.avatar_url && (
-                <img src={agent.avatar_url} alt={agent.name} />
+    <>
+      {/* Agent Panel - left sidebar */}
+      <AgentPanel
+        agent={agent}
+        agentSlug={agentSlug || ''}
+        currentThreadId={threadId}
+        onSelectThread={handleSelectThread}
+        onNewChat={handleNewChat}
+        onWorkspaceToggle={handleWorkspaceToggle}
+        showWorkspace={showWorkspace}
+        isStreaming={isStreaming}
+      />
+      
+      {/* Main Content - Chat or Workspace */}
+      <div className="chat-layout__content">
+        {showWorkspace ? (
+          /* Workspace View */
+          <WorkspaceEmbed 
+            agentSlug={agentSlug || ''} 
+            onBackToChat={() => setShowWorkspace(false)} 
+          />
+        ) : (
+          /* Chat View */
+          <div className="chat-page">
+            {/* Messages */}
+            <div className="chat-page__messages">
+              {/* Loading messages indicator */}
+              {loadingMessages && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '20px',
+                  gap: '8px',
+                  color: 'var(--gray-500)',
+                }}>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span style={{ fontSize: '14px' }}>Loading conversation history...</span>
+                </div>
               )}
+              
+              {messages.length === 0 && !loadingMessages && (
+                <WelcomeScreen 
+                  agent={agent} 
+                  onSuggestionClick={(prompt) => {
+                    setInput(prompt)
+                    // Focus input after setting the prompt
+                    setTimeout(() => inputRef.current?.focus(), 0)
+                  }}
+                />
+              )}
+              
+              {messages.map(message => (
+                <MessageBubble 
+                  key={message.id} 
+                  message={message} 
+                  agent={agent}
+                />
+              ))}
+              
+              <div ref={messagesEndRef} />
             </div>
-            <div>
-              <h1 className="chat-page__agent-name">{agent.name}</h1>
-              <p className="chat-page__agent-role">{agent.role}</p>
-            </div>
-          </div>
-        )}
-        
-        <div className="chat-page__controls">
-          {/* Pending messages indicator */}
-          {pendingCount > 0 && (
-            <div className="chat-page__pending" title={`${pendingCount} message(s) pending sync`}>
-              <AlertCircle size={12} />
-              {pendingCount} pending
-            </div>
-          )}
-          
-          {/* History dropdown and New Chat button */}
-          {agentSlug && (
-            <ChatHistoryDropdown
-              agentSlug={agentSlug}
-              currentThreadId={threadId}
-              onSelectThread={handleSelectThread}
-              onNewChat={handleNewChat}
-              disabled={isStreaming}
-            />
-          )}
-        </div>
-      </div>
-      
-      {/* Messages */}
-      <div className="chat-page__messages">
-        {/* Loading messages indicator */}
-        {loadingMessages && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-            gap: '8px',
-            color: 'var(--gray-500)',
-          }}>
-            <Loader2 size={16} className="animate-spin" />
-            <span style={{ fontSize: '14px' }}>Loading conversation history...</span>
-          </div>
-        )}
-        
-        {messages.length === 0 && !loadingMessages && (
-          <WelcomeScreen 
-            agent={agent} 
-            onSuggestionClick={(prompt) => {
-              setInput(prompt)
-              // Focus input after setting the prompt
-              setTimeout(() => inputRef.current?.focus(), 0)
-            }}
-          />
-        )}
-        
-        {messages.map(message => (
-          <MessageBubble 
-            key={message.id} 
-            message={message} 
-            agent={agent}
-          />
-        ))}
-        
-        <div ref={messagesEndRef} />
-      </div>
-      
-      {/* Error banner */}
-      {error && (
-        <div className="chat-page__error">
-          <AlertCircle size={16} />
-          {error}
-        </div>
-      )}
-      
-      {/* Input - ChatGPT style */}
-      <div className="chat-page__input-container">
-        <div className="chat-page__input-wrapper">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="What's on your mind today?"
-            disabled={isStreaming}
-            rows={1}
-            className="chat-page__textarea"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isStreaming}
-            className="chat-page__send-btn"
-          >
-            {isStreaming ? (
-              <Loader2 size={20} className="animate-spin" />
-            ) : (
-              <Send size={20} />
+            
+            {/* Error banner */}
+            {error && (
+              <div className="chat-page__error">
+                <AlertCircle size={16} />
+                {error}
+              </div>
             )}
-          </button>
-        </div>
+            
+            {/* Pending indicator */}
+            {pendingCount > 0 && (
+              <div className="chat-page__pending-banner">
+                <AlertCircle size={14} />
+                {pendingCount} message(s) pending sync
+              </div>
+            )}
+            
+            {/* Input - Modern style with attachment and mic icons */}
+            <div className="chat-page__input-container">
+              <div className="chat-page__input-wrapper">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Send a message"
+                  disabled={isStreaming}
+                  rows={1}
+                  className="chat-page__textarea"
+                />
+                <div className="chat-page__input-actions">
+                  <button 
+                    className="chat-page__action-btn"
+                    title="Attach file"
+                    type="button"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+                  <button 
+                    className="chat-page__action-btn"
+                    title="Voice input"
+                    type="button"
+                  >
+                    <Mic size={18} />
+                  </button>
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim() || isStreaming}
+                    className="chat-page__send-btn"
+                  >
+                    {isStreaming ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Send size={18} />
+                    )}
+                  </button>
+                </div>
+              </div>
+              <p className="chat-page__disclaimer">
+                Sintra Helpers can make mistakes. Verify important information.
+              </p>
+            </div>
+          
+          {/* Animations */}
+          <style>{`
+            @keyframes blink {
+              0%, 50% { opacity: 1; }
+              51%, 100% { opacity: 0; }
+            }
+            
+            .animate-spin {
+              animation: spin 1s linear infinite;
+            }
+            
+            @keyframes spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+            
+            @keyframes pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.7; }
+            }
+            
+            @keyframes bounce {
+              0%, 100% { transform: translateY(0); }
+              50% { transform: translateY(-4px); }
+            }
+            
+            .working-dot {
+              width: 6px;
+              height: 6px;
+              background: var(--primary-600);
+              border-radius: 50%;
+              animation: bounce 0.6s ease-in-out infinite;
+            }
+          `}</style>
+          </div>
+        )}
       </div>
-      
-      {/* Animations */}
-      <style>{`
-        @keyframes blink {
-          0%, 50% { opacity: 1; }
-          51%, 100% { opacity: 0; }
-        }
-        
-        .animate-spin {
-          animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.7; }
-        }
-        
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-        
-        .working-dot {
-          width: 6px;
-          height: 6px;
-          background: var(--primary-600);
-          border-radius: 50%;
-          animation: bounce 0.6s ease-in-out infinite;
-        }
-      `}</style>
-    </div>
+    </>
   )
 }

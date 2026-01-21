@@ -16,7 +16,7 @@ alwaysApply: true
 
 - **don't Introduce technical debt** — Avoid shortcuts that compromise future maintainability
 - **don't Make assumptions** — Don't guess how external APIs or internal systems work
-- **don't Write fragile code** — Never implement logic that works "by chance" or could break unexpectedly
-- **don't Ignore existing patterns** — Don't reinvent what's already solved in the codebase
+- **don't Write fragile code** — Never implement logic that works "by chance" or could break unexpectedly,
+avoid code duplicate or have multiple files working for same problem, keep best one
 - **don't Take shortcuts** — Avoid quick hacks that will cause problems later
 dont write unreliable logics, 

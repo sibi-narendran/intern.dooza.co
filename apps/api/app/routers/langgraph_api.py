@@ -281,6 +281,40 @@ def setup_langgraph_routes(app: FastAPI):
                         }
                         yield f"data: {json.dumps(clean_event)}\n\n"
                     
+                    # Handle on_chat_model_end for non-streaming models
+                    # When streaming=False, LangGraph emits complete response in on_chat_model_end
+                    # Frontend must handle both on_chat_model_stream (incremental) and on_chat_model_end (complete)
+                    elif event_type == "on_chat_model_end":
+                        output = event.get("data", {}).get("output")
+                        content = ""
+                        
+                        if output:
+                            # Extract content from AIMessage object
+                            content = getattr(output, "content", "")
+                            # Handle list content format (used by some providers like Gemini)
+                            if isinstance(content, list):
+                                text_parts = []
+                                for part in content:
+                                    if isinstance(part, str):
+                                        text_parts.append(part)
+                                    elif isinstance(part, dict) and "text" in part:
+                                        text_parts.append(part["text"])
+                                    elif hasattr(part, "text"):
+                                        text_parts.append(part.text)
+                                content = "".join(text_parts)
+                        
+                        if content:
+                            clean_event = {
+                                "event": event_type,  # Preserve original event type
+                                "content": content,
+                                "metadata": {
+                                    "langgraph_node": metadata.get("langgraph_node", ""),
+                                    "langgraph_step": metadata.get("langgraph_step", 0),
+                                },
+                                "name": event.get("name", ""),
+                            }
+                            yield f"data: {json.dumps(clean_event)}\n\n"
+                    
                     # For tool events, include tool name and data
                     elif event_type in ("on_tool_start", "on_tool_end"):
                         tool_name = event.get("name", "")
@@ -305,9 +339,8 @@ def setup_langgraph_routes(app: FastAPI):
                             # Try to parse JSON content for cleaner output
                             if isinstance(tool_output, str):
                                 try:
-                                    import json as json_lib
-                                    tool_output = json_lib.loads(tool_output)
-                                except (json_lib.JSONDecodeError, ValueError):
+                                    tool_output = json.loads(tool_output)
+                                except (json.JSONDecodeError, ValueError):
                                     pass  # Keep as string if not valid JSON
                             # Truncate large string outputs
                             if isinstance(tool_output, str) and len(tool_output) > 5000:

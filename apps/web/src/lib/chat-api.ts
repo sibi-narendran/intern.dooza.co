@@ -284,8 +284,10 @@ export async function streamChat(
             callbacks.onAgentSwitch?.(effectiveAgent)
           }
           
-          // Handle token streaming from all agents
-          if (eventType === 'on_chat_model_stream') {
+          // Handle chat content events
+          // - on_chat_model_stream: Incremental tokens (streaming providers)
+          // - on_chat_model_end: Complete response (non-streaming providers)
+          if (eventType === 'on_chat_model_stream' || eventType === 'on_chat_model_end') {
             const content = event.content || ''
             if (content) {
               callbacks.onToken?.(content, effectiveAgent)
@@ -300,7 +302,7 @@ export async function streamChat(
             // Check for delegation (transfer_to_* tools)
             if (toolName.startsWith('transfer_to_')) {
               const targetAgent = toolName.replace('transfer_to_', '')
-              activeSpecialist = targetAgent // Remember which specialist we're delegating to
+              activeSpecialist = targetAgent
               callbacks.onDelegate?.(targetAgent)
             } else {
               callbacks.onToolStart?.(toolName, toolInput)
@@ -318,7 +320,6 @@ export async function streamChat(
               continue
             }
             
-            // Pass ui_schema along with result for rendering
             callbacks.onToolEnd?.(toolName, toolOutput, uiSchema)
           }
           

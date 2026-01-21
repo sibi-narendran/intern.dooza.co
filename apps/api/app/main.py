@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import health, integrations, gallery, messages
+from app.routers import health, integrations, gallery, messages, tasks
 from app.routers.langgraph_api import setup_langgraph_routes
 from app.core.database import init_checkpointer, close_checkpointer
 
@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(integrations.router, prefix="/v1/integrations", tags=["Integrations"])
     app.include_router(gallery.router, prefix="/v1", tags=["Gallery"])
     app.include_router(messages.router, prefix="/v1", tags=["Messages"])
+    app.include_router(tasks.router, prefix="/v1", tags=["Tasks"])
     
     # Note: LangGraph routes are added in lifespan AFTER checkpointer init
     

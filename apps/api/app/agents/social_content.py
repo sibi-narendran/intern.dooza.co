@@ -5,10 +5,9 @@ Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent p
 This agent handles content creation tasks for social media platforms.
 """
 
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 
-from app.config import get_settings
+from app.agents.base import get_llm
 from app.tools.social import get_social_tools
 
 
@@ -83,26 +82,21 @@ You have direct access to tools for generating social media content.
 # AGENT FACTORY
 # =============================================================================
 
-def create_social_content_agent(model: ChatOpenAI | None = None):
+def create_social_content_agent(model=None):
     """
     Create the social_content specialist agent using create_agent from langchain.agents.
     
     This is the standard LangGraph v1.0+ pattern for tool-using agents.
     
     Args:
-        model: Optional ChatOpenAI instance. If not provided, uses default.
+        model: Optional LLM instance. If not provided, uses configured provider.
         
     Returns:
         A compiled LangGraph agent ready for invocation.
     """
     if model is None:
-        settings = get_settings()
-        model = ChatOpenAI(
-            api_key=settings.openai_api_key,
-            model=settings.openai_model or "gpt-4o-mini",
-            temperature=0.7,  # Higher for creative content
-            streaming=True,
-        )
+        # Use centralized LLM factory - supports OpenAI, Gemini 3, OpenRouter
+        model = get_llm(streaming=True)
     
     # Get social content tools
     tools = get_social_tools()

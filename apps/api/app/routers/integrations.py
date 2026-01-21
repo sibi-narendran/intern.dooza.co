@@ -344,3 +344,81 @@ async def integration_status(
         "configured": bool(settings.composio_api_key),
         "message": "Composio connected" if client else "Set COMPOSIO_API_KEY to enable integrations"
     }
+
+
+# ============================================================================
+# Social Platform Connections (for Publish UI)
+# ============================================================================
+
+class SocialConnectionInfo(BaseModel):
+    """Information about a social platform connection."""
+    platform: str
+    connection_id: str
+    connected: bool
+    account_name: Optional[str] = None
+
+
+SOCIAL_PLATFORMS = ["instagram", "facebook", "linkedin", "tiktok", "youtube"]
+
+
+@router.get("/social", response_model=list[SocialConnectionInfo])
+async def list_social_connections(
+    user_id: str = Depends(get_current_user),
+):
+    """
+    List social platform connections for publishing.
+    
+    Returns connection status for all supported social platforms:
+    - Instagram
+    - Facebook
+    - LinkedIn
+    - TikTok
+    - YouTube
+    
+    Used by the publish UI to show which platforms are available.
+    """
+    from app.services.connection_service import get_connection_service
+    
+    connection_service = get_connection_service()
+    connections = await connection_service.get_user_connections(user_id)
+    
+    # Build map of connected platforms
+    connected_map = {
+        conn.platform: conn 
+        for conn in connections 
+        if conn.status == "active"
+    }
+    
+    # Return all social platforms with their connection status
+    result = []
+    for platform in SOCIAL_PLATFORMS:
+        conn = connected_map.get(platform)
+        result.append(SocialConnectionInfo(
+            platform=platform,
+            connection_id=conn.connection_id if conn else "",
+            connected=conn is not None,
+            account_name=conn.account_name if conn else None,
+        ))
+    
+    return result
+
+
+@router.get("/social/connected")
+async def get_connected_social_platforms(
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Get list of connected social platform names.
+    
+    Simple endpoint that returns just the platform names that are connected.
+    Useful for quick checks in the UI.
+    """
+    from app.services.connection_service import get_connection_service
+    
+    connection_service = get_connection_service()
+    platforms = await connection_service.get_connected_platforms(user_id)
+    
+    return {
+        "platforms": platforms,
+        "count": len(platforms),
+    }

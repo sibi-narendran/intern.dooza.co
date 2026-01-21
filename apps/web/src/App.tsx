@@ -8,11 +8,15 @@ import Dashboard from './pages/Dashboard'
 import IntegrationsPage from './pages/IntegrationsPage'
 import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import WorkforceGalleryPage from './pages/WorkforceGalleryPage'
+import WorkspacePage from './pages/WorkspacePage'
 import ChatPage from './pages/ChatPage'
 import SettingsPage from './pages/SettingsPage'
 import OAuthCallbackPage from './pages/OAuthCallbackPage'
 
-// Layout wrapper for main app pages (with sidebar)
+/**
+ * Standard layout for non-chat pages
+ * Uses collapsed sidebar + main content area
+ */
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AgentModalProvider>
@@ -26,6 +30,21 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * Chat layout with collapsed sidebar + agent panel + chat content
+ * AgentPanel is rendered inside ChatPage for state management
+ */
+function ChatLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <AgentModalProvider>
+      <div className="chat-layout">
+        <Sidebar />
+        {children}
+      </div>
+    </AgentModalProvider>
+  )
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -33,12 +52,14 @@ function App() {
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <ProtectedRoute>
             <Routes>
-              {/* Main app pages with sidebar/navbar */}
+              {/* Chat pages - special layout with AgentPanel */}
               <Route path="/chat/:agentSlug" element={
-                <AppLayout>
+                <ChatLayout>
                   <ChatPage />
-                </AppLayout>
+                </ChatLayout>
               } />
+              
+              {/* Standard pages with collapsed sidebar */}
               <Route path="/" element={
                 <AppLayout>
                   <Dashboard />
@@ -57,6 +78,11 @@ function App() {
               <Route path="/gallery" element={
                 <AppLayout>
                   <WorkforceGalleryPage />
+                </AppLayout>
+              } />
+              <Route path="/workspace" element={
+                <AppLayout>
+                  <WorkspacePage />
                 </AppLayout>
               } />
               <Route path="/settings" element={

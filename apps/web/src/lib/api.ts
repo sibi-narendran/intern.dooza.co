@@ -314,6 +314,62 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   }
 }
 
+// ============================================================================
+// Generic API Client (for components that need direct HTTP access)
+// ============================================================================
+
+/**
+ * Simple API client with axios-like interface for components
+ * that need to make direct API calls to the FastAPI backend.
+ */
+export const api = {
+  async get<T = any>(path: string): Promise<{ data: T }> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1${path}`, { headers })
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw { response: { data: error } }
+    }
+    
+    const data = await response.json()
+    return { data }
+  },
+  
+  async post<T = any>(path: string, body?: any): Promise<{ data: T }> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1${path}`, {
+      method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw { response: { data: error } }
+    }
+    
+    const data = await response.json()
+    return { data }
+  },
+  
+  async delete<T = any>(path: string): Promise<{ data: T }> {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1${path}`, {
+      method: 'DELETE',
+      headers,
+    })
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw { response: { data: error } }
+    }
+    
+    const data = await response.json()
+    return { data }
+  },
+}
+
 // Cache config
 const APPS_CACHE_KEY = 'dooza_integrations_apps'
 const APPS_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
