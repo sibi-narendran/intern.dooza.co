@@ -1009,3 +1009,55 @@ export async function getBrandContext(): Promise<{
   
   return response.json()
 }
+
+/**
+ * Extract brand response from URL extraction API.
+ */
+export interface BrandExtractResponse {
+  success: boolean
+  url: string
+  extracted: {
+    business_name: string | null
+    website: string | null
+    tagline: string | null
+    colors: { primary?: string; secondary?: string } | null
+    fonts: { heading?: string; body?: string } | null
+    social_links: Record<string, string> | null
+    description: string | null
+    value_proposition: string | null
+    target_audience: string | null
+    industry: string | null
+  }
+  logo: {
+    found: boolean
+    saved: boolean
+    url: string | null
+  }
+  settings_saved: boolean
+  error: string | null
+}
+
+/**
+ * Extract brand information from a company website URL.
+ * 
+ * This fetches the website, extracts:
+ * - Reliable data: meta tags, favicon/logo, social links, colors, fonts
+ * - LLM analysis: description, value proposition, target audience, industry
+ * 
+ * Data is saved directly to brand_settings. Previous data is overwritten.
+ */
+export async function extractBrandFromUrl(url: string): Promise<BrandExtractResponse> {
+  const headers = await getAuthHeaders()
+  const response = await fetch(`${API_BASE}/v1/knowledge/brand/extract`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ url })
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to extract brand data' }))
+    throw new Error(error.detail || 'Failed to extract brand data')
+  }
+  
+  return response.json()
+}

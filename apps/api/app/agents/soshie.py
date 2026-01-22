@@ -1,7 +1,7 @@
 """
 Soshie - Social Media Lead Agent
 
-Standard LangGraph tool-calling agent using create_react_agent.
+Standard LangChain tool-calling agent using create_agent.
 This is the same pattern used by Cursor, ChatGPT, and other production AI systems:
 - LLM decides when to use tools via structured JSON tool calls
 - Tools execute and return results
@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.agents.base import get_llm
@@ -102,7 +102,7 @@ def create_soshie_agent(
     checkpointer: Optional[BaseCheckpointSaver] = None
 ):
     """
-    Create the Soshie agent using LangGraph's create_react_agent.
+    Create the Soshie agent using LangChain's create_agent.
     
     This is the standard tool-calling agent pattern:
     - LLM outputs JSON tool calls (not string parsing)
@@ -123,12 +123,12 @@ def create_soshie_agent(
     # Get workflow tools (create_social_content, etc.)
     tools = WORKFLOW_TOOLS.copy()
     
-    # Create the agent using LangGraph's standard create_react_agent
-    agent = create_react_agent(
+    # Create the agent using LangChain's standard create_agent
+    agent = create_agent(
         model=model,
         tools=tools,
         name="soshie",
-        prompt=SOSHIE_SYSTEM_PROMPT,
+        system_prompt=SOSHIE_SYSTEM_PROMPT,
         checkpointer=checkpointer,
     )
     

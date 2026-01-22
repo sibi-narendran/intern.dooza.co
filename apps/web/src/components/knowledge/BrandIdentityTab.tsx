@@ -21,7 +21,9 @@ import {
   AlertCircle,
   ImagePlus,
   X,
-  Cloud
+  Cloud,
+  Download,
+  Sparkles
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { 
@@ -30,6 +32,7 @@ import {
   getBrandAssets,
   deleteBrandAsset,
   createBrandAsset,
+  extractBrandFromUrl,
   type BrandSettings,
   type BrandAsset,
 } from '../../lib/api'
@@ -573,6 +576,9 @@ export default function BrandIdentityTab() {
   const [deletingAsset, setDeletingAsset] = useState<string | null>(null)
   const [mediaUploading, setMediaUploading] = useState(false)
   const mediaInputRef = useRef<HTMLInputElement>(null)
+  
+  // Website extraction state
+  const [extracting, setExtracting] = useState(false)
 
   // Auto-save callback
   const handleSave = useCallback(async (data: BrandFormData) => {
@@ -753,6 +759,58 @@ export default function BrandIdentityTab() {
       setLogoUploading(false)
     }
   }, [logo])
+  
+  // Extract brand from website
+  const handleExtractFromWebsite = useCallback(async () => {
+    const url = formData.website.trim()
+    if (!url) {
+      setError('Please enter a website URL first')
+      return
+    }
+    
+    setExtracting(true)
+    setError(null)
+    
+    try {
+      const result = await extractBrandFromUrl(url)
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Extraction failed')
+      }
+      
+      const extracted = result.extracted
+      
+      // Update form with extracted data
+      setFormData({
+        business_name: extracted.business_name || '',
+        website: extracted.website || url,
+        tagline: extracted.tagline || '',
+        brand_voice: '', // Not extracted, keep empty
+        colors: {
+          primary: extracted.colors?.primary || '#14b8a6',
+          secondary: extracted.colors?.secondary || '#0d9488',
+          tertiary: '#0f766e', // Not typically extracted
+        },
+        description: extracted.description || '',
+        value_proposition: extracted.value_proposition || '',
+        industry: extracted.industry || '',
+        target_audience: extracted.target_audience || '',
+      })
+      
+      // Reload assets to get the new logo if extracted
+      if (result.logo.saved) {
+        const allAssets = await getBrandAssets()
+        const logoAsset = allAssets.find(a => a.asset_type === 'logo')
+        setLogo(logoAsset || null)
+      }
+      
+    } catch (err) {
+      console.error('Brand extraction failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to extract brand data')
+    } finally {
+      setExtracting(false)
+    }
+  }, [formData.website])
 
   if (loading) {
     return (
@@ -828,13 +886,49 @@ export default function BrandIdentityTab() {
                 <Globe size={13} style={{ color: 'var(--gray-500)' }} />
                 Website
               </label>
-              <input
-                type="url"
-                value={formData.website}
-                onChange={e => setFormData(prev => ({ ...prev, website: e.target.value }))}
-                placeholder="https://example.com"
-                style={inputStyle}
-              />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="url"
+                  value={formData.website}
+                  onChange={e => setFormData(prev => ({ ...prev, website: e.target.value }))}
+                  placeholder="https://example.com"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <button
+                  onClick={handleExtractFromWebsite}
+                  disabled={extracting || !formData.website.trim()}
+                  title="Fetch brand info from website"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '0 14px',
+                    background: extracting ? 'var(--gray-100)' : 'linear-gradient(135deg, var(--primary-500), var(--primary-600))',
+                    color: extracting ? 'var(--gray-400)' : 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: extracting || !formData.website.trim() ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
+                    boxShadow: extracting ? 'none' : '0 2px 8px rgba(20, 184, 166, 0.3)',
+                  }}
+                >
+                  {extracting ? (
+                    <>
+                      <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                      Fetching...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={14} />
+                      Auto-fill
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
             
             <div>

@@ -40,6 +40,7 @@ class BrandSettingsUpdate(BaseModel):
     brand_voice: Optional[str] = None
     colors: Optional[dict] = Field(None, description="{ primary, secondary, tertiary }")
     fonts: Optional[dict] = Field(None, description="{ heading, body }")
+    social_links: Optional[dict] = Field(None, description="{ twitter, linkedin, instagram, facebook, youtube, ... }")
     description: Optional[str] = None
     value_proposition: Optional[str] = None
     industry: Optional[str] = None
@@ -56,12 +57,28 @@ class BrandSettingsResponse(BaseModel):
     brand_voice: Optional[str] = None
     colors: dict = {}
     fonts: dict = {}
+    social_links: dict = {}
     description: Optional[str] = None
     value_proposition: Optional[str] = None
     industry: Optional[str] = None
     target_audience: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class BrandExtractRequest(BaseModel):
+    """Request to extract brand data from URL."""
+    url: str = Field(..., description="Company website URL to extract brand data from")
+
+
+class BrandExtractResponse(BaseModel):
+    """Response from brand extraction."""
+    success: bool
+    url: str
+    extracted: dict = {}
+    logo: dict = {}
+    settings_saved: bool = False
+    error: Optional[str] = None
 
 
 class BrandAssetResponse(BaseModel):
@@ -115,6 +132,7 @@ def settings_to_response(settings: BrandSettings) -> BrandSettingsResponse:
         brand_voice=settings.brand_voice,
         colors=settings.colors,
         fonts=settings.fonts,
+        social_links=settings.social_links,
         description=settings.description,
         value_proposition=settings.value_proposition,
         industry=settings.industry,
@@ -204,6 +222,7 @@ async def update_brand_settings(
         brand_voice=update.brand_voice,
         colors=update.colors,
         fonts=update.fonts,
+        social_links=update.social_links,
         description=update.description,
         value_proposition=update.value_proposition,
         industry=update.industry,
@@ -219,6 +238,65 @@ async def update_brand_settings(
     
     logger.info(f"Updated brand settings for org {org_id}")
     return settings_to_response(settings)
+
+
+@router.post("/brand/extract", response_model=BrandExtractResponse)
+async def extract_brand_from_url(
+    request: BrandExtractRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Extract brand information from a company URL.
+    
+    This endpoint:
+    1. Fetches the website HTML
+    2. Extracts reliable data (meta tags, favicon, social links, colors, fonts)
+    3. Uses LLM to analyze page text for semantic fields (description, value prop, etc.)
+    4. Saves everything directly to brand_settings
+    
+    The data is saved immediately. User can edit via PUT /brand endpoint later.
+    """
+    from app.services.brand_extractor import extract_and_save_brand
+    
+    service = get_knowledge_service()
+    
+    org_id = await service.get_user_org_id(user_id)
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No organization found for user",
+        )
+    
+    try:
+        result = await extract_and_save_brand(
+            url=request.url,
+            org_id=org_id,
+            user_id=user_id,
+        )
+        
+        logger.info(f"Extracted brand from {request.url} for org {org_id}")
+        
+        return BrandExtractResponse(
+            success=result["success"],
+            url=result["url"],
+            extracted=result["extracted"],
+            logo=result["logo"],
+            settings_saved=result["settings_saved"],
+        )
+        
+    except ValueError as e:
+        logger.warning(f"Brand extraction failed for {request.url}: {e}")
+        return BrandExtractResponse(
+            success=False,
+            url=request.url,
+            error=str(e),
+        )
+    except Exception as e:
+        logger.error(f"Brand extraction error for {request.url}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Extraction failed: {str(e)}",
+        )
 
 
 # =============================================================================

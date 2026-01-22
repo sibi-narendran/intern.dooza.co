@@ -315,6 +315,21 @@ def setup_langgraph_routes(app: FastAPI):
                     if event_type == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk")
                         content = getattr(chunk, "content", "") if chunk else ""
+                        
+                        # Handle list content format (used by some providers like Gemini)
+                        if isinstance(content, list):
+                            text_parts = []
+                            for part in content:
+                                if isinstance(part, str):
+                                    text_parts.append(part)
+                                elif isinstance(part, dict) and "text" in part:
+                                    # Ensure string type for join()
+                                    text_parts.append(str(part["text"]) if part["text"] is not None else "")
+                                elif hasattr(part, "text"):
+                                    # Ensure string type for join()
+                                    text_parts.append(str(part.text) if part.text is not None else "")
+                            content = "".join(text_parts)
+                        
                         node_name = metadata.get("langgraph_node", "")
                         
                         # Build clean event with extracted content
@@ -346,9 +361,11 @@ def setup_langgraph_routes(app: FastAPI):
                                     if isinstance(part, str):
                                         text_parts.append(part)
                                     elif isinstance(part, dict) and "text" in part:
-                                        text_parts.append(part["text"])
+                                        # Ensure string type for join()
+                                        text_parts.append(str(part["text"]) if part["text"] is not None else "")
                                     elif hasattr(part, "text"):
-                                        text_parts.append(part.text)
+                                        # Ensure string type for join()
+                                        text_parts.append(str(part.text) if part.text is not None else "")
                                 content = "".join(text_parts)
                         
                         if content:

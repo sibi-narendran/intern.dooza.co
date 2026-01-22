@@ -38,6 +38,7 @@ class BrandSettings:
     brand_voice: Optional[str] = None
     colors: dict = field(default_factory=dict)  # {primary, secondary, tertiary}
     fonts: dict = field(default_factory=dict)   # {heading, body}
+    social_links: dict = field(default_factory=dict)  # {twitter, linkedin, instagram, ...}
     description: Optional[str] = None
     value_proposition: Optional[str] = None
     industry: Optional[str] = None
@@ -228,6 +229,7 @@ class KnowledgeService:
         brand_voice: Optional[str] = None,
         colors: Optional[dict] = None,
         fonts: Optional[dict] = None,
+        social_links: Optional[dict] = None,
         description: Optional[str] = None,
         value_proposition: Optional[str] = None,
         industry: Optional[str] = None,
@@ -261,6 +263,8 @@ class KnowledgeService:
             update_data["colors"] = colors
         if fonts is not None:
             update_data["fonts"] = fonts
+        if social_links is not None:
+            update_data["social_links"] = social_links
         if description is not None:
             update_data["description"] = description
         if value_proposition is not None:
@@ -600,6 +604,7 @@ class KnowledgeService:
             brand_voice=row.get("brand_voice"),
             colors=row.get("colors") or {},
             fonts=row.get("fonts") or {},
+            social_links=row.get("social_links") or {},
             description=row.get("description"),
             value_proposition=row.get("value_proposition"),
             industry=row.get("industry"),
