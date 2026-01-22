@@ -1,16 +1,21 @@
 """
 SEO Analytics Specialist Agent
 
-Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent pattern.
+Uses create_react_agent from langgraph.prebuilt for the standard LangGraph pattern.
 This agent handles analytics and data-focused SEO tasks.
 
 Note: Tools are under development. Requires GSC/GA integrations.
 """
 
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_agent  # Standard LangGraph V1.0+ import
+from __future__ import annotations
 
-from app.config import get_settings
+import logging
+
+from langgraph.prebuilt import create_react_agent
+
+from app.agents.base import get_llm
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -57,37 +62,34 @@ When asked to perform a task, I will:
 # AGENT FACTORY
 # =============================================================================
 
-def create_seo_analytics_agent(model: ChatOpenAI | None = None):
+def create_seo_analytics_agent(model=None):
     """
-    Create the seo-analytics specialist agent using create_agent from langchain.agents.
+    Create the seo-analytics specialist agent using create_react_agent.
     
-    Note: Currently has no tools - requires integrations.
+    Note: Currently has no tools - requires GSC/GA integrations.
     
     Args:
-        model: Optional ChatOpenAI instance. If not provided, uses default.
+        model: Optional LLM instance. If not provided, uses configured provider.
         
     Returns:
         A compiled LangGraph agent ready for invocation.
     """
     if model is None:
-        settings = get_settings()
-        model = ChatOpenAI(
-            api_key=settings.openai_api_key,  # Explicitly pass API key from settings
-            model=settings.openai_model or "gpt-4o-mini",
-            temperature=0.5,
-            streaming=True,
-        )
+        # Use centralized LLM factory - supports OpenAI, Gemini 3, OpenRouter
+        model = get_llm(streaming=True)
     
     # No tools yet - requires integrations
     tools = []
     
-    # Create the agent using LangGraph's standard pattern
-    agent = create_agent(
+    # Create the agent using LangGraph's create_react_agent
+    agent = create_react_agent(
         model=model,
         tools=tools,
         name="seo_analytics",
-        system_prompt=SEO_ANALYTICS_SYSTEM_PROMPT,
+        prompt=SEO_ANALYTICS_SYSTEM_PROMPT,
     )
+    
+    logger.info("Created seo_analytics agent (no tools - requires integrations)")
     
     return agent
 

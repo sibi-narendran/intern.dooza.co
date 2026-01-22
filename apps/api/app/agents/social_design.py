@@ -1,16 +1,22 @@
 """
 Social Design Specialist Agent
 
-Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent pattern.
+Uses create_react_agent from langgraph.prebuilt for the standard LangGraph pattern.
 This agent handles visual content creation tasks.
 
 Note: Image generation tools are under development. Agent currently provides guidance only.
 """
 
-from langchain.agents import create_agent
+from __future__ import annotations
+
+import logging
+
+from langgraph.prebuilt import create_react_agent
 
 from app.agents.base import get_llm
 from app.tools.image import get_image_tools
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -88,9 +94,9 @@ When asked to perform a task, I will:
 
 def create_social_design_agent(model=None):
     """
-    Create the social_design specialist agent using create_agent from langchain.agents.
+    Create the social_design specialist agent using create_react_agent.
     
-    Note: Currently has no tools - under development.
+    Note: Currently has limited tools - under development.
     Image generation tools will be added once Replicate/Flux integration is ready.
     
     Args:
@@ -103,17 +109,19 @@ def create_social_design_agent(model=None):
         # Use centralized LLM factory - supports OpenAI, Gemini 3, OpenRouter
         model = get_llm(streaming=True)
     
-    # No tools yet - under development
+    # Get image tools (limited - under development)
     # Will integrate with Replicate/Flux for image generation
     tools = get_image_tools()
     
-    # Create the agent using LangGraph's standard pattern
-    agent = create_agent(
+    # Create the agent using LangGraph's create_react_agent
+    agent = create_react_agent(
         model=model,
         tools=tools,
         name="social_design",
-        system_prompt=SOCIAL_DESIGN_SYSTEM_PROMPT,
+        prompt=SOCIAL_DESIGN_SYSTEM_PROMPT,
     )
+    
+    logger.info("Created social_design agent with %d tools", len(tools))
     
     return agent
 

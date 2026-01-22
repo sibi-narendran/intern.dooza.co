@@ -434,14 +434,19 @@ async def schedule_publish(
     """
     from app.scheduler.jobs import schedule_publish as schedule_job
     
-    # Update task with target platforms and scheduled time
+    # Fetch task first to get current version and verify ownership
     try:
-        # First update task status to scheduled
+        task = await service.get_task(task_id, user_id)
+    except TaskNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Update task status to scheduled using actual version
+    try:
         await service.update_status(
             task_id=task_id,
             user_id=user_id,
             new_status="scheduled",
-            version=1,  # Will be fetched from task
+            version=task["version"],
             scheduled_at=request.scheduled_for,
         )
     except InvalidTransitionError as e:
@@ -451,6 +456,15 @@ async def schedule_publish(
                 "message": f"Cannot schedule task in '{e.current_status}' status",
                 "current_status": e.current_status,
                 "allowed_transitions": e.allowed,
+            }
+        )
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Task was modified. Please refresh and try again.",
+                "current_version": e.current_version,
+                "your_version": e.your_version,
             }
         )
     except TaskNotFoundError:
@@ -494,25 +508,54 @@ async def cancel_scheduled_publish(
     """
     from app.scheduler.jobs import cancel_scheduled
     
+    # First verify user owns this task (authorization check)
+    try:
+        task = await service.get_task(task_id, user_id)
+    except TaskNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Verify task is actually scheduled
+    if task["status"] != "scheduled":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"Task is not scheduled (current status: {task['status']})",
+                "current_status": task["status"],
+            }
+        )
+    
     # Cancel the scheduled job
     cancelled = cancel_scheduled(task_id)
     
     if not cancelled:
         logger.warning(f"No scheduled job found for task {task_id}")
     
-    # Update task status back to approved
+    # Update task status back to approved with optimistic locking
     from app.core.database import get_supabase_client
     supabase = get_supabase_client()
     if supabase:
-        supabase.table("workspace_tasks")\
+        result = supabase.table("workspace_tasks")\
             .update({
                 "status": "approved",
                 "scheduled_for": None,
+                "version": task["version"] + 1,
             })\
             .eq("id", str(task_id))\
+            .eq("user_id", user_id)\
+            .eq("version", task["version"])\
             .execute()
+        
+        if not result.data:
+            # Version mismatch - someone else modified the task
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Task was modified by another request. Please refresh and try again.",
+                    "your_version": task["version"],
+                }
+            )
     
-    logger.info(f"Cancelled scheduled publish for task {task_id}")
+    logger.info(f"Cancelled scheduled publish for task {task_id} by user {user_id}")
     
     return {"cancelled": True, "task_id": str(task_id)}
 
@@ -555,6 +598,7 @@ async def retry_publish(
 async def get_scheduled_info(
     task_id: UUID,
     user_id: str = Depends(get_current_user),
+    service: TaskService = Depends(get_service),
 ):
     """
     Get scheduling information for a task.
@@ -562,6 +606,12 @@ async def get_scheduled_info(
     Returns job details if the task is scheduled.
     """
     from app.scheduler.jobs import get_job_for_task
+    
+    # Verify user owns this task (authorization check)
+    try:
+        await service.get_task(task_id, user_id)
+    except TaskNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
     
     job_info = get_job_for_task(task_id)
     

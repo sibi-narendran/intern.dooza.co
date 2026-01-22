@@ -34,10 +34,27 @@ from app.agents.soshie import (
 )
 
 # Soshie Specialists
-from app.agents.social_content import create_social_content_agent
+# Note: social_content is deprecated in favor of content_workflow for content creation
+# Kept for backwards compatibility and testing
+from app.agents.social_content import create_social_content_agent  # Deprecated
 from app.agents.social_design import create_social_design_agent
 from app.agents.social_research import create_social_research_agent
 from app.agents.social_publisher import create_social_publisher_agent
+
+# Content Evaluator (uses ContentFeedback from schemas/content_workflow.py)
+from app.agents.content_evaluator import (
+    ContentFeedback,
+    evaluate_content,
+    quick_evaluate,
+    PLATFORM_CRITERIA,
+)
+
+# Content Workflow (preferred for content creation)
+from app.workflows.content_workflow import (
+    create_content_workflow,
+    create_content_workflow_agent,
+    run_content_workflow,
+)
 
 # Factory utilities
 from app.agents.factory import (
@@ -90,10 +107,21 @@ __all__ = [
     "SOSHIE_CONFIG",
     
     # Soshie Specialists
-    "create_social_content_agent",
+    "create_social_content_agent",  # Deprecated - use content_workflow
     "create_social_design_agent",
     "create_social_research_agent",
     "create_social_publisher_agent",
+    
+    # Content Evaluator
+    "ContentFeedback",
+    "evaluate_content",
+    "quick_evaluate",
+    "PLATFORM_CRITERIA",
+    
+    # Content Workflow (preferred for content creation)
+    "create_content_workflow",
+    "create_content_workflow_agent",
+    "run_content_workflow",
     
     # Factory
     "get_agent",

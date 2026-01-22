@@ -27,6 +27,17 @@ from app.schemas.tasks import (
     validate_status_transition,
 )
 
+from app.schemas.content_workflow import (
+    HashtagResearch,
+    TimingResearch,
+    ContentIdeasResearch,
+    ContentBrief,
+    DraftContent,
+    ContentFeedback,
+    FinalContent,
+    WorkflowMetadata,
+)
+
 __all__ = [
     # Content schemas
     "BlogPostContent",
@@ -47,4 +58,13 @@ __all__ = [
     "TaskStatus",
     "VALID_TRANSITIONS",
     "validate_status_transition",
+    # Content workflow schemas
+    "HashtagResearch",
+    "TimingResearch",
+    "ContentIdeasResearch",
+    "ContentBrief",
+    "DraftContent",
+    "ContentFeedback",
+    "FinalContent",
+    "WorkflowMetadata",
 ]

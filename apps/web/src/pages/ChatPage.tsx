@@ -355,12 +355,73 @@ function DelegationIndicator({ delegation }: { delegation: Delegation }) {
   )
 }
 
+/** Workflow progress indicator - shows current step in content creation */
+function WorkflowNodeIndicator({ nodeName }: { nodeName: string }) {
+  // Map node names to user-friendly labels and icons
+  const nodeConfig: Record<string, { label: string; emoji: string; description: string }> = {
+    'parallel_research': { label: 'Researching', emoji: '🔍', description: 'Gathering hashtags, timing & ideas' },
+    'validate_research': { label: 'Validating', emoji: '✓', description: 'Checking research quality' },
+    'create_brief': { label: 'Creating Brief', emoji: '📋', description: 'Synthesizing research into plan' },
+    'generate_draft': { label: 'Writing Draft', emoji: '✍️', description: 'Creating your content' },
+    'evaluate_content': { label: 'Evaluating', emoji: '🔎', description: 'Checking content quality' },
+    'refine_content': { label: 'Refining', emoji: '✨', description: 'Improving based on feedback' },
+    'polish_final': { label: 'Polishing', emoji: '💎', description: 'Final touches' },
+    'create_task': { label: 'Saving', emoji: '💾', description: 'Creating task in workspace' },
+    // Generic fallback for any other nodes
+    'content_workflow': { label: 'Processing', emoji: '⚙️', description: 'Working on your request' },
+  }
+  
+  const config = nodeConfig[nodeName] || { 
+    label: nodeName.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), 
+    emoji: '⚙️',
+    description: 'Processing...'
+  }
+  
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '10px 14px',
+      margin: '8px 0',
+      background: 'linear-gradient(135deg, #f0f9ff, #e0f2fe)',
+      borderRadius: '10px',
+      border: '1px solid #bae6fd',
+      fontSize: '13px',
+      animation: 'fadeIn 0.3s ease-out',
+    }}>
+      <span style={{ fontSize: '16px' }}>{config.emoji}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '8px',
+          fontWeight: 600,
+          color: '#0369a1',
+        }}>
+          {config.label}
+          <Loader2 size={12} className="animate-spin" style={{ color: '#0ea5e9' }} />
+        </div>
+        <div style={{ 
+          fontSize: '11px', 
+          color: '#64748b',
+          marginTop: '2px',
+        }}>
+          {config.description}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MessageBubble({ 
   message, 
-  agent 
+  agent,
+  currentWorkflowNode,
 }: { 
   message: ChatMessage
   agent: GalleryAgent | null 
+  currentWorkflowNode?: string | null
 }) {
   const isUser = message.role === 'user'
   const isWorking = message.isStreaming && !message.content && !message.toolCalls?.length
@@ -430,8 +491,13 @@ function MessageBubble({
             boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
           }}>
             {/* Working indicator */}
-            {isWorking && (
+            {isWorking && !currentWorkflowNode && (
               <WorkingIndicator agentName={agent?.name || 'Agent'} />
+            )}
+            
+            {/* Workflow progress indicator - shows current step in content creation */}
+            {message.isStreaming && currentWorkflowNode && (
+              <WorkflowNodeIndicator nodeName={currentWorkflowNode} />
             )}
             
             {/* Segments with agent labels - OR fallback to content */}
@@ -570,6 +636,9 @@ export default function ChatPage() {
   
   // Workspace view toggle (for agents with workspace support like Soshie)
   const [showWorkspace, setShowWorkspace] = useState(false)
+  
+  // Workflow progress tracking - shows current node in content_workflow
+  const [currentWorkflowNode, setCurrentWorkflowNode] = useState<string | null>(null)
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -897,6 +966,17 @@ export default function ChatPage() {
             }))
           },
           
+          onNodeStart: (nodeName) => {
+            // Show workflow progress for content_workflow nodes
+            setCurrentWorkflowNode(nodeName)
+          },
+          
+          onNodeEnd: () => {
+            // Clear workflow progress (will show next node or nothing when done)
+            // We don't clear immediately - let onNodeStart of next node update it
+            // Only clear when stream ends
+          },
+          
           onThreadId: (id) => {
             setThreadId(id)
             receivedThreadId = id
@@ -928,6 +1008,7 @@ export default function ChatPage() {
           },
           
           onEnd: () => {
+            setCurrentWorkflowNode(null) // Clear workflow progress
             setMessages(prev => prev.map((msg, idx) => 
               idx === prev.length - 1 && msg.role === 'assistant'
                 ? { ...msg, isStreaming: false }
@@ -1111,11 +1192,17 @@ export default function ChatPage() {
                 />
               )}
               
-              {messages.map(message => (
+              {messages.map((message, idx) => (
                 <MessageBubble 
                   key={message.id} 
                   message={message} 
                   agent={agent}
+                  currentWorkflowNode={
+                    // Only show workflow progress for the last message (the streaming one)
+                    idx === messages.length - 1 && message.isStreaming 
+                      ? currentWorkflowNode 
+                      : null
+                  }
                 />
               ))}
               

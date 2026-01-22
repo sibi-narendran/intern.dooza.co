@@ -115,6 +115,10 @@ export interface ChatCallbacks {
   onToolData?: (toolData: ToolData) => void  // Full structured data for UI rendering
   onDelegate?: (toAgent: string) => void
   onAgentSwitch?: (agent: string) => void
+  /** Called when a workflow node starts - shows progress through workflow steps */
+  onNodeStart?: (nodeName: string, metadata?: { step?: number }) => void
+  /** Called when a workflow node completes */
+  onNodeEnd?: (nodeName: string) => void
   onStatus?: (status: string) => void
   onThreadId?: (threadId: string) => void
   onError?: (error: string) => void
@@ -284,10 +288,28 @@ export async function streamChat(
             callbacks.onAgentSwitch?.(effectiveAgent)
           }
           
+          // Handle node/chain start events - shows workflow progress
+          // These fire when entering a new node in a StateGraph workflow
+          if (eventType === 'on_chain_start' && langgraphNode) {
+            // Skip internal nodes like 'model' or 'agent' - only show workflow steps
+            const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
+            if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
+              callbacks.onNodeStart?.(langgraphNode, { step: metadata.langgraph_step })
+            }
+          }
+          
+          // Handle node/chain end events
+          else if (eventType === 'on_chain_end' && langgraphNode) {
+            const internalNodes = ['model', 'agent', '__start__', '__end__']
+            if (!internalNodes.includes(langgraphNode) && event.name !== 'LangGraph') {
+              callbacks.onNodeEnd?.(langgraphNode)
+            }
+          }
+          
           // Handle chat content events
           // - on_chat_model_stream: Incremental tokens (streaming providers)
           // - on_chat_model_end: Complete response (non-streaming providers)
-          if (eventType === 'on_chat_model_stream' || eventType === 'on_chat_model_end') {
+          else if (eventType === 'on_chat_model_stream' || eventType === 'on_chat_model_end') {
             const content = event.content || ''
             if (content) {
               callbacks.onToken?.(content, effectiveAgent)
@@ -323,10 +345,10 @@ export async function streamChat(
             callbacks.onToolEnd?.(toolName, toolOutput, uiSchema)
           }
           
-          // Handle chain end (final output)
+          // Handle final chain end (LangGraph root)
           else if (eventType === 'on_chain_end' && event.name === 'LangGraph') {
             activeSpecialist = '' // Reset specialist tracking
-            callbacks.onEnd?.()
+            // onEnd is called when stream closes, not here (prevents duplicate)
           }
           
           // Reset specialist when returning to supervisor

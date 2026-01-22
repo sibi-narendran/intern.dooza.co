@@ -1,14 +1,30 @@
 """
 Social Content Specialist Agent
 
-Uses create_agent from langchain.agents for the standard LangGraph v1.0+ agent pattern.
-This agent handles content creation tasks for social media platforms.
+DEPRECATED: This agent is replaced by content_workflow for production use.
+The content_workflow provides:
+- Parallel research (hashtags, timing, ideas, competitor)
+- Evaluator-optimizer loop for quality
+- Automatic task creation
+
+Use content_workflow via Soshie supervisor or directly:
+    from app.workflows.content_workflow import run_content_workflow
+
+This file is kept for backwards compatibility and quick testing only.
+DO NOT USE IN PRODUCTION - use content_workflow instead.
 """
 
-from langchain.agents import create_agent
+from __future__ import annotations
+
+import logging
+import warnings
+
+from langgraph.prebuilt import create_react_agent
 
 from app.agents.base import get_llm
 from app.tools.social import get_social_tools
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -84,9 +100,10 @@ You have direct access to tools for generating social media content.
 
 def create_social_content_agent(model=None):
     """
-    Create the social_content specialist agent using create_agent from langchain.agents.
+    Create the social_content specialist agent.
     
-    This is the standard LangGraph v1.0+ pattern for tool-using agents.
+    DEPRECATED: Use content_workflow for production.
+    This is kept for backwards compatibility only.
     
     Args:
         model: Optional LLM instance. If not provided, uses configured provider.
@@ -94,6 +111,13 @@ def create_social_content_agent(model=None):
     Returns:
         A compiled LangGraph agent ready for invocation.
     """
+    warnings.warn(
+        "create_social_content_agent is deprecated. "
+        "Use content_workflow for content creation instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    
     if model is None:
         # Use centralized LLM factory - supports OpenAI, Gemini 3, OpenRouter
         model = get_llm(streaming=True)
@@ -101,13 +125,15 @@ def create_social_content_agent(model=None):
     # Get social content tools
     tools = get_social_tools()
     
-    # Create the agent using LangGraph's standard pattern
-    agent = create_agent(
+    # Create the agent using LangGraph's create_react_agent
+    agent = create_react_agent(
         model=model,
         tools=tools,
         name="social_content",
-        system_prompt=SOCIAL_CONTENT_SYSTEM_PROMPT,
+        prompt=SOCIAL_CONTENT_SYSTEM_PROMPT,
     )
+    
+    logger.info("Created deprecated social_content agent - use content_workflow instead")
     
     return agent
 
