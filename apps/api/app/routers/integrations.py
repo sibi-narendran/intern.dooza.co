@@ -296,16 +296,28 @@ async def initiate_connection(
         )
 
 
+class DisconnectRequest(BaseModel):
+    """Request body for disconnect (optional platform for local DB update)."""
+    platform: Optional[str] = None
+
+
 @router.delete("/connections/{connection_id}")
 async def disconnect(
     connection_id: str,
+    platform: Optional[str] = Query(None, description="Platform slug for local DB update"),
     user_id: str = Depends(get_current_user),
 ):
     """
     Disconnect (revoke) an integration connection.
     
-    This revokes the OAuth tokens and removes the connection.
+    This:
+    1. Revokes OAuth tokens in Composio
+    2. Updates local database status to 'revoked'
+    
+    Pass ?platform=instagram to ensure local DB is updated.
     """
+    from app.services.integration_repository import get_integration_repository
+    
     client = get_composio_client()
     
     if not client:
@@ -315,8 +327,18 @@ async def disconnect(
         )
     
     try:
-        # Delete the connected account
+        # Delete the connected account from Composio
         client.connected_accounts.delete(connection_id)
+        
+        # Update local database status
+        if platform:
+            repo = get_integration_repository()
+            await repo.update_connection_status(
+                user_id=user_id,
+                platform=platform,
+                status="revoked",
+            )
+            logger.info(f"Updated local DB: {platform} marked as revoked for user {user_id}")
         
         return {"status": "disconnected", "connection_id": connection_id}
     except Exception as e:
@@ -344,6 +366,87 @@ async def integration_status(
         "configured": bool(settings.composio_api_key),
         "message": "Composio connected" if client else "Set COMPOSIO_API_KEY to enable integrations"
     }
+
+
+# ============================================================================
+# OAuth Callback - Save Connection to Local DB
+# ============================================================================
+
+class OAuthCallbackRequest(BaseModel):
+    """Request body for OAuth callback."""
+    platform: str
+    connection_id: str
+    account_name: Optional[str] = None
+
+
+class OAuthCallbackResponse(BaseModel):
+    """Response from OAuth callback."""
+    success: bool
+    platform: str
+    message: str
+
+
+@router.post("/callback", response_model=OAuthCallbackResponse)
+async def oauth_callback(
+    request: OAuthCallbackRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Callback endpoint after OAuth popup completes.
+    
+    Frontend calls this after the OAuth popup closes to:
+    1. Verify the connection with Composio
+    2. Save connection metadata to local database
+    
+    This ensures fast reads from local DB and preserves connection history.
+    """
+    from app.services.integration_repository import get_integration_repository
+    
+    client = get_composio_client()
+    platform = request.platform.lower()
+    
+    # Verify connection exists in Composio
+    account_name = request.account_name
+    account_id = None
+    
+    if client:
+        try:
+            entity_id = get_entity_id(ConnectionScope.PERSONAL, user_id, None)
+            entity = client.get_entity(id=entity_id)
+            connections = entity.get_connections()
+            
+            # Find the matching connection
+            for conn in connections:
+                if conn.id == request.connection_id:
+                    account_name = getattr(conn, 'account_display', None) or account_name
+                    account_id = getattr(conn, 'accountId', None)
+                    break
+        except Exception as e:
+            logger.warning(f"Could not verify connection from Composio: {e}")
+    
+    # Save to local database
+    repo = get_integration_repository()
+    saved = await repo.save_connection(
+        user_id=user_id,
+        platform=platform,
+        composio_connection_id=request.connection_id,
+        account_name=account_name,
+        account_id=account_id,
+    )
+    
+    if saved:
+        logger.info(f"Saved {platform} connection to local DB for user {user_id}")
+        return OAuthCallbackResponse(
+            success=True,
+            platform=platform,
+            message=f"Connected to {platform.title()}" + (f" ({account_name})" if account_name else ""),
+        )
+    else:
+        logger.error(f"Failed to save {platform} connection for user {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save connection. Please try again."
+        )
 
 
 # ============================================================================
@@ -375,18 +478,39 @@ async def list_social_connections(
     - TikTok
     - YouTube
     
-    Used by the publish UI to show which platforms are available.
+    Reads from LOCAL DATABASE for fast performance.
+    Includes migration fallback: syncs from Composio if local DB is empty.
     """
+    from app.services.integration_repository import get_integration_repository
     from app.services.connection_service import get_connection_service
     
-    connection_service = get_connection_service()
-    connections = await connection_service.get_user_connections(user_id)
+    repo = get_integration_repository()
+    connections = await repo.get_user_connections(user_id)
+    
+    # MIGRATION FALLBACK: If local DB is empty, sync from Composio
+    if not connections:
+        conn_service = get_connection_service()
+        composio_conns = await conn_service.get_user_connections(user_id)
+        
+        if composio_conns:
+            logger.info(f"Migrating {len(composio_conns)} Composio connections to local DB for user {user_id}")
+            for c in composio_conns:
+                if c.status.lower() == "active":
+                    await repo.save_connection(
+                        user_id=user_id,
+                        platform=c.platform,
+                        composio_connection_id=c.connection_id,
+                        account_name=c.account_name,
+                        account_id=c.account_id,
+                    )
+            # Re-fetch from local DB
+            connections = await repo.get_user_connections(user_id)
     
     # Build map of connected platforms
     connected_map = {
-        conn.platform: conn 
+        conn.integration_slug: conn 
         for conn in connections 
-        if conn.status == "active"
+        if conn.status.lower() == "active"
     }
     
     # Return all social platforms with their connection status
@@ -395,7 +519,7 @@ async def list_social_connections(
         conn = connected_map.get(platform)
         result.append(SocialConnectionInfo(
             platform=platform,
-            connection_id=conn.connection_id if conn else "",
+            connection_id=conn.composio_connection_id if conn else "",
             connected=conn is not None,
             account_name=conn.account_name if conn else None,
         ))
@@ -411,12 +535,38 @@ async def get_connected_social_platforms(
     Get list of connected social platform names.
     
     Simple endpoint that returns just the platform names that are connected.
-    Useful for quick checks in the UI.
+    Reads from LOCAL DATABASE for fast performance.
+    Includes migration fallback: syncs from Composio if local DB is empty.
     """
+    from app.services.integration_repository import get_integration_repository
     from app.services.connection_service import get_connection_service
     
-    connection_service = get_connection_service()
-    platforms = await connection_service.get_connected_platforms(user_id)
+    repo = get_integration_repository()
+    connections = await repo.get_user_connections(user_id)
+    
+    # MIGRATION FALLBACK: If local DB is empty, sync from Composio
+    if not connections:
+        conn_service = get_connection_service()
+        composio_conns = await conn_service.get_user_connections(user_id)
+        
+        if composio_conns:
+            logger.info(f"Migrating {len(composio_conns)} Composio connections for user {user_id}")
+            for c in composio_conns:
+                if c.status.lower() == "active":
+                    await repo.save_connection(
+                        user_id=user_id,
+                        platform=c.platform,
+                        composio_connection_id=c.connection_id,
+                        account_name=c.account_name,
+                        account_id=c.account_id,
+                    )
+            connections = await repo.get_user_connections(user_id)
+    
+    platforms = [
+        conn.integration_slug 
+        for conn in connections 
+        if conn.status.lower() == "active"
+    ]
     
     return {
         "platforms": platforms,

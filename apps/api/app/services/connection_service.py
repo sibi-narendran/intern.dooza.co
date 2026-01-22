@@ -1,11 +1,14 @@
 """
 Connection Service
 
-Manages user's Composio connections for social media platforms.
-Provides connection verification and retrieval for the publish pipeline.
+Manages user's social media connections for agents and the publish pipeline.
 
-This service bridges the gap between user-level OAuth connections
-(managed via Composio) and the publishing workflow.
+ARCHITECTURE:
+- Reads from LOCAL DATABASE (user_integrations table) for fast access
+- Falls back to Composio API if local DB is empty (migration support)
+- Used by all agents (Seomi, Soshie, social_publisher, etc.)
+
+This provides a centralized source of truth for all agents.
 """
 
 from __future__ import annotations
@@ -46,15 +49,6 @@ SOCIAL_PLATFORMS = [
     "youtube",
 ]
 
-# Composio app keys mapped to our platform names
-PLATFORM_TO_COMPOSIO_APP = {
-    "instagram": "instagram",
-    "facebook": "facebook",
-    "linkedin": "linkedin",
-    "tiktok": "tiktok",
-    "youtube": "youtube",
-}
-
 
 # =============================================================================
 # CONNECTION SERVICE
@@ -62,33 +56,35 @@ PLATFORM_TO_COMPOSIO_APP = {
 
 class ConnectionService:
     """
-    Manages user's Composio connections for social platforms.
+    Centralized connection service for all agents.
     
-    Used by the publish pipeline to:
-    1. Verify which platforms a user has connected
-    2. Get connection_ids for publishing
-    3. Check connection health before publishing
+    Reads from LOCAL DATABASE first, with Composio fallback for migration.
+    
+    Used by:
+    - Soshie (social media agent)
+    - Seomi (SEO agent - for future integrations)
+    - social_publisher (publishing specialist)
+    - Any agent that needs to check user's connected platforms
     """
     
     def __init__(self):
-        self._client = None
+        self._composio_client = None
     
     def _get_composio_client(self):
-        """Get or create Composio client instance."""
-        if self._client is not None:
-            return self._client
+        """Get or create Composio client instance (for migration fallback)."""
+        if self._composio_client is not None:
+            return self._composio_client
         
         settings = get_settings()
         
         if not settings.composio_api_key:
-            logger.warning("COMPOSIO_API_KEY not set - connection service disabled")
+            logger.warning("COMPOSIO_API_KEY not set - Composio fallback disabled")
             return None
         
         try:
             from composio import Composio
-            self._client = Composio(api_key=settings.composio_api_key)
-            logger.info("Composio client initialized for ConnectionService")
-            return self._client
+            self._composio_client = Composio(api_key=settings.composio_api_key)
+            return self._composio_client
         except ImportError:
             logger.error("composio-core not installed")
             return None
@@ -100,20 +96,33 @@ class ConnectionService:
         """Generate Composio entity ID for user."""
         return f"user_{user_id}"
     
-    async def get_user_connections(self, user_id: str) -> list[SocialConnection]:
-        """
-        List all connected social platforms for a user.
-        
-        Args:
-            user_id: The user's ID
+    async def _get_from_local_db(self, user_id: str) -> list[SocialConnection]:
+        """Get connections from local user_integrations table."""
+        try:
+            from app.services.integration_repository import get_integration_repository
             
-        Returns:
-            List of SocialConnection objects for connected platforms
-        """
+            repo = get_integration_repository()
+            stored_conns = await repo.get_user_connections(user_id)
+            
+            return [
+                SocialConnection(
+                    platform=c.integration_slug,
+                    connection_id=c.composio_connection_id,
+                    account_name=c.account_name,
+                    account_id=c.account_id,
+                    status=c.status,
+                )
+                for c in stored_conns
+            ]
+        except Exception as e:
+            logger.error(f"Failed to read from local DB: {e}")
+            return []
+    
+    async def _get_from_composio(self, user_id: str) -> list[SocialConnection]:
+        """Get connections directly from Composio API (fallback)."""
         client = self._get_composio_client()
         
         if not client:
-            logger.warning("No Composio client available, returning empty connections")
             return []
         
         try:
@@ -123,7 +132,6 @@ class ConnectionService:
             
             result = []
             for conn in connections:
-                # Get app key (handles different SDK versions)
                 app_key = (
                     getattr(conn, 'appUniqueId', None) or 
                     getattr(conn, 'app_unique_key', None) or 
@@ -131,7 +139,6 @@ class ConnectionService:
                     'unknown'
                 ).lower()
                 
-                # Only include social platforms
                 if app_key in SOCIAL_PLATFORMS:
                     result.append(SocialConnection(
                         platform=app_key,
@@ -141,12 +148,63 @@ class ConnectionService:
                         status=conn.status,
                     ))
             
-            logger.info(f"Found {len(result)} social connections for user {user_id}")
             return result
             
         except Exception as e:
-            logger.error(f"Failed to fetch connections for user {user_id}: {e}")
+            logger.error(f"Failed to fetch from Composio: {e}")
             return []
+    
+    async def _sync_composio_to_local(self, user_id: str, composio_conns: list[SocialConnection]) -> None:
+        """Sync Composio connections to local database (migration)."""
+        try:
+            from app.services.integration_repository import get_integration_repository
+            
+            repo = get_integration_repository()
+            
+            for conn in composio_conns:
+                if conn.status.lower() == "active":
+                    await repo.save_connection(
+                        user_id=user_id,
+                        platform=conn.platform,
+                        composio_connection_id=conn.connection_id,
+                        account_name=conn.account_name,
+                        account_id=conn.account_id,
+                    )
+            
+            logger.info(f"Migrated {len(composio_conns)} connections to local DB for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to sync to local DB: {e}")
+    
+    async def get_user_connections(self, user_id: str) -> list[SocialConnection]:
+        """
+        Get all connected social platforms for a user.
+        
+        Reads from LOCAL DATABASE first. Falls back to Composio if empty
+        (for migration of existing users).
+        
+        Args:
+            user_id: The user's ID
+            
+        Returns:
+            List of SocialConnection objects for connected platforms
+        """
+        # Step 1: Try local database first (fast)
+        connections = await self._get_from_local_db(user_id)
+        
+        if connections:
+            logger.debug(f"Found {len(connections)} connections in local DB for user {user_id}")
+            return connections
+        
+        # Step 2: Fallback to Composio (migration support)
+        logger.info(f"No local connections for user {user_id}, checking Composio...")
+        composio_conns = await self._get_from_composio(user_id)
+        
+        if composio_conns:
+            # Sync to local database for future fast access
+            await self._sync_composio_to_local(user_id, composio_conns)
+            return composio_conns
+        
+        return []
     
     async def get_connection_for_platform(
         self, 
@@ -172,7 +230,7 @@ class ConnectionService:
         connections = await self.get_user_connections(user_id)
         
         for conn in connections:
-            if conn.platform == platform and conn.status == "active":
+            if conn.platform == platform and conn.status.lower() == "active":
                 return conn.connection_id
         
         return None
@@ -185,9 +243,7 @@ class ConnectionService:
         """
         Check which platforms are connected and return their connection_ids.
         
-        This is called before publishing to ensure all required platforms
-        are connected. Returns a dict mapping platform to connection_id
-        (or None if not connected).
+        Used before publishing to ensure all required platforms are connected.
         
         Args:
             user_id: The user's ID
@@ -202,7 +258,7 @@ class ConnectionService:
         connection_map = {
             conn.platform: conn.connection_id 
             for conn in connections 
-            if conn.status == "active"
+            if conn.status.lower() == "active"
         }
         
         # Return requested platforms with their connection_ids
@@ -224,7 +280,7 @@ class ConnectionService:
         """
         Get list of platform names that user has connected.
         
-        Useful for UI to show which platforms are available for publishing.
+        Useful for agents to know which platforms are available.
         
         Args:
             user_id: The user's ID
@@ -236,7 +292,7 @@ class ConnectionService:
         return [
             conn.platform 
             for conn in connections 
-            if conn.status == "active"
+            if conn.status.lower() == "active"
         ]
     
     async def check_connection_health(
@@ -262,8 +318,6 @@ class ConnectionService:
                 "error": f"No active connection for {platform}. Please connect your account."
             }
         
-        # For now, if we have a connection_id, assume it's healthy
-        # In the future, we could make a test API call here
         return {
             "healthy": True,
             "connection_id": connection_id

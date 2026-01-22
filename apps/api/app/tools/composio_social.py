@@ -514,6 +514,63 @@ async def publish_task(
 
 
 # =============================================================================
+# INTEGRATION ACTION TOOL (Agent-to-UI)
+# =============================================================================
+
+@tool
+async def request_connect_integration(platform: str, reason: str = "") -> dict:
+    """
+    Request user to connect a social media platform.
+    
+    Use this tool when you need to publish to a platform that is not connected.
+    Returns an action card that the frontend renders as a "Connect" button.
+    The user can click the button to connect their account without leaving the chat.
+    
+    Args:
+        platform: Platform to connect (instagram, facebook, linkedin, tiktok, youtube)
+        reason: Why the connection is needed (e.g., "to publish your post")
+    
+    Returns:
+        Action card data that frontend renders as a connect button
+    """
+    platform = platform.lower()
+    
+    if platform not in SOCIAL_PLATFORMS:
+        return {
+            "success": False,
+            "error": f"Unknown platform: {platform}. Valid platforms: {', '.join(SOCIAL_PLATFORMS)}",
+        }
+    
+    # Platform display names
+    platform_names = {
+        "instagram": "Instagram",
+        "facebook": "Facebook",
+        "linkedin": "LinkedIn",
+        "tiktok": "TikTok",
+        "youtube": "YouTube",
+    }
+    
+    display_name = platform_names.get(platform, platform.title())
+    
+    # Build the message
+    if reason:
+        message = f"Please connect your {display_name} account {reason}."
+    else:
+        message = f"Please connect your {display_name} account to continue."
+    
+    logger.info(f"Requesting user to connect {platform}: {reason}")
+    
+    return {
+        "action": "connect_integration",
+        "platform": platform,
+        "platform_name": display_name,
+        "reason": reason,
+        "message": message,
+        "help_text": "Click the button below to securely connect your account.",
+    }
+
+
+# =============================================================================
 # TOOL FACTORY
 # =============================================================================
 
@@ -524,6 +581,7 @@ def get_social_publish_tools() -> list:
     Returns list of tools:
     - get_user_social_connections
     - check_platform_connection
+    - request_connect_integration
     - publish_to_instagram
     - publish_to_facebook
     - publish_to_linkedin
@@ -534,6 +592,7 @@ def get_social_publish_tools() -> list:
     return [
         get_user_social_connections,
         check_platform_connection,
+        request_connect_integration,
         publish_to_instagram,
         publish_to_facebook,
         publish_to_linkedin,
@@ -548,4 +607,5 @@ def get_connection_tools() -> list:
     return [
         get_user_social_connections,
         check_platform_connection,
+        request_connect_integration,
     ]

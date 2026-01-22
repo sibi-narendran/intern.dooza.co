@@ -39,7 +39,7 @@ import { ToolUISchema, formatSummary } from '../types/tool-ui'
 import WelcomeScreen from '../components/WelcomeScreen'
 import { formatToolName } from '../config/tool-display-names'
 import TaskCreatedCard from '../components/workspace/TaskCreatedCard'
-import { WorkspaceEmbed } from '../components/workspace'
+import { WorkspaceEmbed, IntegrationActionCard, isIntegrationAction } from '../components/workspace'
 
 // ============================================================================
 // Types
@@ -213,6 +213,16 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
           padding: '12px',
         }}>
           <TaskCreatedCard result={parsedResult} />
+        </div>
+      )}
+      
+      {/* Special card for request_connect_integration - shows connect button */}
+      {tool.name === 'request_connect_integration' && isComplete && parsedResult && isIntegrationAction(parsedResult) && (
+        <div style={{
+          borderTop: '1px solid #e2e8f0',
+          padding: '12px',
+        }}>
+          <IntegrationActionCard data={parsedResult} />
         </div>
       )}
     </div>

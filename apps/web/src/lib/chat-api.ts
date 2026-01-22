@@ -299,10 +299,23 @@ export async function streamChat(
           }
           
           // Handle node/chain end events
-          else if (eventType === 'on_chain_end' && langgraphNode) {
-            const internalNodes = ['model', 'agent', '__start__', '__end__']
-            if (!internalNodes.includes(langgraphNode) && event.name !== 'LangGraph') {
-              callbacks.onNodeEnd?.(langgraphNode)
+          // NOTE: LangGraph root completion (event.name === 'LangGraph') must be checked
+          // first because langgraphNode is also 'LangGraph' (truthy) in that case
+          else if (eventType === 'on_chain_end') {
+            if (event.name === 'LangGraph') {
+              // LangGraph root completion - reset specialist tracking for conversation end
+              activeSpecialist = ''
+              // onEnd is called when stream closes, not here (prevents duplicate)
+            } else if (langgraphNode) {
+              // Reset specialist when returning to supervisor (agent node)
+              if (langgraphNode === 'agent' && activeSpecialist) {
+                activeSpecialist = ''
+              }
+              // Workflow node completion - fire callback for non-internal nodes
+              const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
+              if (!internalNodes.includes(langgraphNode)) {
+                callbacks.onNodeEnd?.(langgraphNode)
+              }
             }
           }
           
@@ -343,17 +356,6 @@ export async function streamChat(
             }
             
             callbacks.onToolEnd?.(toolName, toolOutput, uiSchema)
-          }
-          
-          // Handle final chain end (LangGraph root)
-          else if (eventType === 'on_chain_end' && event.name === 'LangGraph') {
-            activeSpecialist = '' // Reset specialist tracking
-            // onEnd is called when stream closes, not here (prevents duplicate)
-          }
-          
-          // Reset specialist when returning to supervisor
-          else if (langgraphNode === 'agent' && activeSpecialist) {
-            activeSpecialist = ''
           }
           
           // Handle errors

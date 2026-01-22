@@ -506,15 +506,21 @@ export async function initiateConnection(
 }
 
 /**
- * Disconnect (revoke) an integration
+ * Disconnect (revoke) an integration.
+ * Pass platform to also update local database status.
  */
-export async function disconnectIntegration(connectionId: string): Promise<void> {
+export async function disconnectIntegration(
+  connectionId: string, 
+  platform?: string
+): Promise<void> {
   const headers = await getAuthHeaders()
   
-  const response = await fetch(
-    `${API_BASE}/v1/integrations/connections/${connectionId}`,
-    { method: 'DELETE', headers }
-  )
+  // Include platform as query param so backend can update local DB
+  const url = platform 
+    ? `${API_BASE}/v1/integrations/connections/${connectionId}?platform=${platform}`
+    : `${API_BASE}/v1/integrations/connections/${connectionId}`
+  
+  const response = await fetch(url, { method: 'DELETE', headers })
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }))
@@ -542,6 +548,171 @@ export async function getIntegrationStatus(): Promise<{
   } catch {
     return { enabled: false, configured: false, message: 'Failed to connect to API' }
   }
+}
+
+// ============================================================================
+// Social Platform Connections
+// ============================================================================
+
+/**
+ * Social connection status for a platform.
+ * Used by IntegrationsPanel and publish workflows.
+ */
+export interface SocialConnection {
+  platform: string
+  connection_id: string
+  connected: boolean
+  account_name: string | null
+}
+
+/**
+ * Get social platform connections for the current user.
+ * Returns connection status for all 5 supported platforms:
+ * Instagram, Facebook, LinkedIn, TikTok, YouTube
+ */
+export async function getSocialConnections(): Promise<SocialConnection[]> {
+  try {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1/integrations/social`, { headers })
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to fetch connections' }))
+      throw new Error(error.detail || 'Failed to fetch social connections')
+    }
+    
+    return response.json()
+  } catch (error) {
+    console.error('Failed to fetch social connections:', error)
+    return []
+  }
+}
+
+/**
+ * Get list of connected social platform names.
+ * Useful for quick checks in the UI.
+ */
+export async function getConnectedSocialPlatforms(): Promise<{ platforms: string[], count: number }> {
+  try {
+    const headers = await getAuthHeaders()
+    const response = await fetch(`${API_BASE}/v1/integrations/social/connected`, { headers })
+    
+    if (!response.ok) {
+      return { platforms: [], count: 0 }
+    }
+    
+    return response.json()
+  } catch {
+    return { platforms: [], count: 0 }
+  }
+}
+
+/**
+ * Save OAuth connection to local database via callback endpoint.
+ * Called after OAuth popup completes to sync connection to local DB.
+ */
+async function saveOAuthCallback(
+  platform: string, 
+  connectionId: string
+): Promise<void> {
+  const headers = await getAuthHeaders()
+  
+  const response = await fetch(`${API_BASE}/v1/integrations/callback`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      platform,
+      connection_id: connectionId,
+    })
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to save connection' }))
+    throw new Error(error.detail || 'Failed to save connection')
+  }
+}
+
+/**
+ * Open OAuth connection in a popup window for a social platform.
+ * 
+ * Flow:
+ * 1. Initiate connection with Composio (get redirect URL + connection_id)
+ * 2. Open OAuth popup for user consent
+ * 3. After popup closes, save connection to local database
+ * 4. Call onSuccess/onError callbacks
+ */
+export function openOAuthPopup(
+  platform: string,
+  onSuccess?: () => void,
+  onError?: (error: string) => void
+): void {
+  const popupName = `dooza-connect-${platform}-${Date.now()}`
+  
+  // Start the connection flow
+  initiateConnection(platform, 'personal')
+    .then(({ redirect_url, connection_id }) => {
+      const popup = window.open(
+        redirect_url,
+        popupName,
+        'width=600,height=700,scrollbars=yes,resizable=yes'
+      )
+      
+      if (!popup) {
+        onError?.('Popup was blocked. Please allow popups for this site.')
+        return
+      }
+      
+      // Poll for popup close
+      const pollTimer = setInterval(async () => {
+        if (popup.closed) {
+          clearInterval(pollTimer)
+          
+          // Save connection to local database after OAuth completes
+          try {
+            await saveOAuthCallback(platform, connection_id)
+            onSuccess?.()
+          } catch (error) {
+            // Connection might still work even if DB save fails
+            console.error('Failed to save connection to local DB:', error)
+            onSuccess?.() // Still call success since OAuth completed
+          }
+        }
+      }, 500)
+      
+      // Listen for postMessage from callback page
+      const messageHandler = async (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return
+        
+        if (event.data?.type === 'oauth-callback') {
+          clearInterval(pollTimer)
+          window.removeEventListener('message', messageHandler)
+          
+          if (event.data.success) {
+            // Save connection to local database
+            try {
+              await saveOAuthCallback(platform, connection_id)
+            } catch (error) {
+              console.error('Failed to save connection to local DB:', error)
+            }
+            onSuccess?.()
+          } else {
+            onError?.(event.data.error || 'Connection failed')
+          }
+          
+          popup.close()
+        }
+      }
+      
+      window.addEventListener('message', messageHandler)
+      
+      // Cleanup after 5 minutes (timeout)
+      setTimeout(() => {
+        clearInterval(pollTimer)
+        window.removeEventListener('message', messageHandler)
+      }, 5 * 60 * 1000)
+    })
+    .catch((error) => {
+      onError?.(error.message || 'Failed to initiate connection')
+    })
 }
 
 // ============================================================================

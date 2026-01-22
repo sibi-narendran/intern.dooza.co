@@ -5,6 +5,7 @@
  * - Task rendering and status badges
  * - Calendar view
  * - Approval workflow UI
+ * - Social integrations management
  */
 
 export { default as TaskRenderer, TaskPreview } from './TaskRenderer';
@@ -16,3 +17,6 @@ export { default as FeedbackModal } from './FeedbackModal';
 export { default as ScheduleModal } from './ScheduleModal';
 export { default as TaskCreatedCard } from './TaskCreatedCard';
 export { default as WorkspaceEmbed } from './WorkspaceEmbed';
+export { default as IntegrationsPanel } from './IntegrationsPanel';
+export { default as IntegrationActionCard, isIntegrationAction } from './IntegrationActionCard';
+export { default as PlatformIcon } from './PlatformIcon';
