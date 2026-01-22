@@ -8,12 +8,6 @@
  */
 
 export const AGENT_PROMPTS: Record<string, string[]> = {
-  seomi: [
-    "How can I get more visitors to my website?",
-    "Why isn't my business showing up on Google?",
-    "Help me rank higher in search results",
-    "What's wrong with my website?",
-  ],
   soshie: [
     "Help me create content for social media",
     "What should I post this week?",

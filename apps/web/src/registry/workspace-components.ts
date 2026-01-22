@@ -177,22 +177,6 @@ export const STATUS_CONFIG: Record<TaskStatus, {
  * 3. Add entry here with lazy imports
  */
 export const WORKSPACE_REGISTRY: Record<string, WorkspaceConfig> = {
-  // SEO Domain
-  'seomi:blog_post': {
-    view: lazy(() => import('../domains/seo/BlogCard')),
-    edit: lazy(() => import('../domains/seo/BlogEditor')),
-    color: '#10b981',
-    icon: 'FileText',
-    label: 'Blog Post',
-  },
-  'seomi:content_brief': {
-    view: lazy(() => import('../domains/seo/ContentBriefCard')),
-    edit: lazy(() => import('../domains/seo/ContentBriefEditor')),
-    color: '#059669',
-    icon: 'FileSearch',
-    label: 'Content Brief',
-  },
-  
   // Social Domain
   'soshie:tweet': {
     view: lazy(() => import('../domains/social/TweetCard')),

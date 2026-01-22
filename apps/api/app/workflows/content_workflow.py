@@ -53,6 +53,30 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# WORKFLOW CAPABILITIES (Self-Describing)
+# =============================================================================
+
+WORKFLOW_CAPABILITIES = {
+    "name": "content_workflow",
+    "description": "Creates text-based social media content with research, evaluation, and multi-platform adaptation",
+    "supported_platforms": ["linkedin", "instagram", "twitter", "facebook", "tiktok"],
+    "content_types": ["post", "thread"],
+    "required_fields": ["request", "platforms", "user_id"],
+    "what_i_do": [
+        "Research hashtags, timing, and content ideas",
+        "Generate and evaluate content quality",
+        "Adapt content for multiple platforms",
+        "Create workspace tasks for approval",
+    ],
+    "what_i_cannot_do": [
+        "Create video content (YouTube, TikTok videos)",
+        "Post directly without user approval",
+        "Create content for unsupported platforms",
+    ],
+}
+
+
+# =============================================================================
 # WORKFLOW STATE
 # =============================================================================
 
@@ -68,15 +92,36 @@ class ContentWorkflowState(TypedDict):
     Main state for the content creation workflow.
     
     This state flows through all nodes and accumulates results.
+    Supports multi-platform content creation via the "Create Master -> Adapt" pattern.
+    
+    Self-describing: Returns workflow_status and capabilities so supervisor
+    can handle any outcome gracefully.
     """
     # Input from user/supervisor
     request: str
-    platform: str
     content_type: str
     user_id: str
     agent_slug: str
     
+    # Multi-platform support (LangGraph standard: explicit state fields)
+    platforms: List[str]              # Target platforms ["linkedin", "instagram", ...]
+    master_platform: str              # First platform, used for master content
+    
+    # ==========================================================================
+    # SELF-DESCRIBING RESPONSE (supervisor reads these to handle result)
+    # ==========================================================================
+    workflow_status: str              # "success" | "cannot_proceed" | "not_connected" | "error"
+    error_type: Optional[str]         # "invalid_platforms" | "missing_field" | "unknown_request" | etc.
+    error_detail: Optional[str]       # Human-readable explanation
+    capabilities: Optional[dict]      # WORKFLOW_CAPABILITIES (so supervisor knows what we can do)
+    
+    # Connection validation results
+    connected_platforms: List[str]           # Platforms user has connected
+    disconnected_platforms: List[str]        # Requested but not connected
+    unsupported_platforms: List[str]         # Requested but we can't handle (e.g., youtube)
+    
     # Research results (populated by parallel tasks)
+    # Research is done for master_platform, adaptations inherit insights
     hashtag_research: Optional[dict]
     timing_research: Optional[dict]
     content_ideas: Optional[dict]
@@ -88,15 +133,208 @@ class ContentWorkflowState(TypedDict):
     evaluation: Optional[dict]
     iteration_count: int
     
-    # Final output
-    final_content: Optional[dict]
-    task_id: Optional[str]
+    # Master content (after polish, before adaptation)
+    master_content: Optional[dict]
+    
+    # Multi-platform output
+    adapted_content: Optional[dict]   # {platform: {text, hashtags}} for all platforms
+    content_group_id: Optional[str]   # Links related tasks together
+    task_ids: List[str]               # All created task IDs
+    failed_platforms: List[str]       # Platforms that failed task creation
+    
+    # Legacy single-platform fields (kept for backward compatibility)
+    platform: str                     # Alias for master_platform
+    final_content: Optional[dict]     # Alias for master_content
+    task_id: Optional[str]            # First task ID (for single-platform calls)
     
     # Messages for supervisor compatibility
     messages: Annotated[List[BaseMessage], add_messages]
     
+    # UI actions for frontend (e.g., connection prompts)
+    ui_actions: List[dict]
+    
     # Error handling
     error: Optional[str]
+
+
+# =============================================================================
+# VALIDATE REQUEST NODE (Entry Point - Self-Describing)
+# =============================================================================
+
+async def validate_request(state: ContentWorkflowState) -> dict:
+    """
+    Validate request before starting content creation.
+    
+    This is the single entry point that checks ALL prerequisites:
+    1. Platforms provided (required)
+    2. Platforms are supported (filter unsupported)
+    3. Platforms are connected (check DB)
+    
+    Returns self-describing status so supervisor can handle any outcome:
+    - workflow_status: "success" | "cannot_proceed" | "not_connected"
+    - error_type: explains why (for cannot_proceed)
+    - capabilities: WORKFLOW_CAPABILITIES (so supervisor knows what we can do)
+    
+    This pattern allows the supervisor to handle ANY validation failure gracefully
+    without hardcoding conditions for each error type.
+    """
+    from app.services.connection_service import get_connection_service
+    
+    platforms = state.get("platforms") or [state.get("platform")]
+    user_id = state.get("user_id")
+    request = state.get("request", "")
+    
+    # ---------------------------------------------------------------------------
+    # Step 1: Check if platforms provided
+    # ---------------------------------------------------------------------------
+    if not platforms or platforms == [None]:
+        logger.info("No platforms provided in request")
+        return {
+            "workflow_status": "cannot_proceed",
+            "error_type": "missing_platforms",
+            "error_detail": "No platforms specified in the request.",
+            "capabilities": WORKFLOW_CAPABILITIES,
+            "connected_platforms": [],
+            "disconnected_platforms": [],
+            "unsupported_platforms": [],
+        }
+    
+    # Normalize platforms to lowercase
+    platforms = [p.lower() for p in platforms if p]
+    
+    # ---------------------------------------------------------------------------
+    # Step 2: Check if platforms are supported
+    # ---------------------------------------------------------------------------
+    supported = WORKFLOW_CAPABILITIES["supported_platforms"]
+    supported_requested = [p for p in platforms if p in supported]
+    unsupported_requested = [p for p in platforms if p not in supported]
+    
+    if unsupported_requested:
+        logger.info(f"Unsupported platforms requested: {unsupported_requested}")
+    
+    if not supported_requested:
+        # ALL platforms are unsupported (e.g., user asked for YouTube only)
+        return {
+            "workflow_status": "cannot_proceed",
+            "error_type": "unsupported_platforms",
+            "error_detail": f"I can't create content for {', '.join(p.title() for p in unsupported_requested)}. {WORKFLOW_CAPABILITIES['what_i_cannot_do'][0]}",
+            "capabilities": WORKFLOW_CAPABILITIES,
+            "connected_platforms": [],
+            "disconnected_platforms": [],
+            "unsupported_platforms": unsupported_requested,
+        }
+    
+    # ---------------------------------------------------------------------------
+    # Step 3: Check if user_id provided (for connection check)
+    # ---------------------------------------------------------------------------
+    if not user_id:
+        logger.warning("No user_id in state, skipping connection check")
+        # Proceed with supported platforms, assuming connected
+        return {
+            "workflow_status": "success",
+            "capabilities": WORKFLOW_CAPABILITIES,
+            "platforms": supported_requested,
+            "master_platform": supported_requested[0],
+            "connected_platforms": supported_requested,
+            "disconnected_platforms": [],
+            "unsupported_platforms": unsupported_requested,
+        }
+    
+    # ---------------------------------------------------------------------------
+    # Step 4: Check connections for supported platforms
+    # ---------------------------------------------------------------------------
+    try:
+        connection_service = get_connection_service()
+        all_connections = await connection_service.get_user_connections(user_id)
+        connected = [c.platform for c in all_connections if c.status == "active"]
+        
+        logger.info(f"User {user_id} connections: {connected}, requested: {supported_requested}")
+        
+        connected_requested = [p for p in supported_requested if p in connected]
+        disconnected_requested = [p for p in supported_requested if p not in connected]
+        
+        if not disconnected_requested:
+            # All supported platforms are connected - full success
+            logger.info("All requested platforms are connected, proceeding")
+            return {
+                "workflow_status": "success",
+                "capabilities": WORKFLOW_CAPABILITIES,
+                "platforms": supported_requested,
+                "master_platform": supported_requested[0],
+                "connected_platforms": connected_requested,
+                "disconnected_platforms": [],
+                "unsupported_platforms": unsupported_requested,
+            }
+        
+        # Some or all platforms not connected
+        ui_actions = list(state.get("ui_actions") or [])
+        ui_actions.append({
+            "type": "connection_prompt",
+            "platforms": disconnected_requested,
+            "message": "Connect to continue",
+        })
+        
+        if connected_requested:
+            # SOME connected - partial success possible
+            logger.info(f"Some platforms connected: {connected_requested}, disconnected: {disconnected_requested}")
+            return {
+                "workflow_status": "not_connected",
+                "error_type": "partial_connection",
+                "error_detail": f"{', '.join(p.title() for p in disconnected_requested)} not connected.",
+                "capabilities": WORKFLOW_CAPABILITIES,
+                "platforms": supported_requested,
+                "master_platform": supported_requested[0],
+                "connected_platforms": connected_requested,
+                "disconnected_platforms": disconnected_requested,
+                "unsupported_platforms": unsupported_requested,
+                "ui_actions": ui_actions,
+            }
+        else:
+            # NONE connected
+            logger.info(f"No requested platforms connected: {disconnected_requested}")
+            return {
+                "workflow_status": "not_connected",
+                "error_type": "no_connection",
+                "error_detail": f"None of the requested platforms are connected.",
+                "capabilities": WORKFLOW_CAPABILITIES,
+                "platforms": supported_requested,
+                "connected_platforms": [],
+                "disconnected_platforms": disconnected_requested,
+                "unsupported_platforms": unsupported_requested,
+                "ui_actions": ui_actions,
+            }
+        
+    except Exception as e:
+        logger.error(f"Failed to check connections: {e}")
+        return {
+            "workflow_status": "error",
+            "error_type": "connection_check_failed",
+            "error_detail": f"Could not verify platform connections: {str(e)}",
+            "capabilities": WORKFLOW_CAPABILITIES,
+            "connected_platforms": [],
+            "disconnected_platforms": [],
+            "unsupported_platforms": unsupported_requested,
+            "error": str(e),
+        }
+
+
+def route_after_validation(state: ContentWorkflowState) -> str:
+    """
+    Conditional routing after validation.
+    
+    - workflow_status == "success" → proceed to parallel_research
+    - Any other status → halt workflow (return END)
+    
+    The supervisor reads workflow_status to handle non-success cases.
+    """
+    status = state.get("workflow_status", "")
+    
+    if status == "success":
+        logger.info("Validation passed, proceeding to content creation")
+        return "parallel_research"
+    
+    logger.info(f"Validation returned status '{status}', halting workflow")
+    return END
 
 
 # =============================================================================
@@ -297,7 +535,8 @@ async def run_parallel_research(state: ContentWorkflowState) -> dict:
     import asyncio
     
     topic = state.get("request", "")
-    platform = state.get("platform", "instagram")
+    # Use master_platform for research (research is done for master, adaptations inherit)
+    platform = state.get("master_platform") or state.get("platform", "linkedin")
     content_type = state.get("content_type", "post")
     
     research_input: ResearchTaskState = {
@@ -390,7 +629,8 @@ async def create_brief(state: ContentWorkflowState) -> dict:
     ideas_data = state.get("content_ideas", {})
     
     request = state.get("request", "")
-    platform = state.get("platform", "instagram")
+    # Use master_platform for content creation
+    platform = state.get("master_platform") or state.get("platform", "linkedin")
     content_type = state.get("content_type", "post")
     
     # Build brief from research
@@ -720,20 +960,20 @@ def route_after_evaluation(state: ContentWorkflowState) -> str:
 
 async def polish_final(state: ContentWorkflowState) -> dict:
     """
-    Final polish and formatting of content.
+    Final polish and formatting of master content.
     
     Ensures proper formatting, hashtags, and platform conventions.
+    Sets master_content for potential multi-platform adaptation.
     """
     if state.get("error"):
         return {}
     
-    logger.info("Polishing final content")
+    logger.info("Polishing master content")
     
     draft = state.get("draft_content", {})
-    brief = state.get("content_brief", {})
     evaluation = state.get("evaluation", {})
     
-    platform = draft.get("platform", "instagram")
+    master_platform = state.get("master_platform") or state.get("platform", "linkedin")
     text = draft.get("text", "")
     hashtags = draft.get("hashtags", [])
     
@@ -748,8 +988,8 @@ async def polish_final(state: ContentWorkflowState) -> dict:
         "content_tip": state.get("content_ideas", {}).get("format_tip", ""),
     }
     
-    final_content = {
-        "platform": platform,
+    master_content = {
+        "platform": master_platform,
         "content_type": state.get("content_type", "post"),
         "text": text,
         "hashtags": formatted_hashtags,
@@ -758,18 +998,188 @@ async def polish_final(state: ContentWorkflowState) -> dict:
         "iterations_needed": state.get("iteration_count", 1),
     }
     
-    return {"final_content": final_content}
+    # Set both master_content and final_content (backward compatibility)
+    return {
+        "master_content": master_content,
+        "final_content": master_content,  # Alias for single-platform compatibility
+    }
 
 
 # =============================================================================
-# TASK CREATION NODE
+# ADAPT FOR PLATFORMS NODE
+# =============================================================================
+
+def _create_simple_adaptation(master: dict, platform: str) -> dict:
+    """
+    Fallback: rule-based adaptation without LLM.
+    
+    Used when JSON parsing fails or as a safety net.
+    """
+    text = master.get("text", "")
+    hashtags = master.get("hashtags", [])
+    
+    # Platform-specific length limits and adjustments
+    adaptations = {
+        "twitter": {"max_len": 250, "max_tags": 2, "suffix": ""},
+        "instagram": {"max_len": 2200, "max_tags": 10, "suffix": ""},
+        "tiktok": {"max_len": 300, "max_tags": 5, "suffix": ""},
+        "facebook": {"max_len": 500, "max_tags": 3, "suffix": ""},
+        "linkedin": {"max_len": 3000, "max_tags": 5, "suffix": ""},
+    }
+    
+    config = adaptations.get(platform, {"max_len": 500, "max_tags": 5, "suffix": ""})
+    
+    # Truncate text if needed
+    if len(text) > config["max_len"]:
+        text = text[:config["max_len"] - 3] + "..."
+    
+    # Limit hashtags
+    limited_hashtags = hashtags[:config["max_tags"]]
+    
+    return {
+        "text": text,
+        "hashtags": limited_hashtags,
+        "platform": platform,
+        "adapted_from": master.get("platform", "master"),
+    }
+
+
+async def adapt_for_platforms(state: ContentWorkflowState) -> dict:
+    """
+    Adapt master content for other platforms in a SINGLE LLM call.
+    
+    This is the efficient multi-platform pattern:
+    - Master content is already created and polished
+    - One LLM call produces all platform adaptations
+    - Falls back to rule-based adaptation if LLM fails
+    
+    LangGraph standard: This node only handles adaptation logic,
+    state management is handled by the reducer.
+    """
+    import json
+    import uuid
+    
+    master = state.get("master_content", {})
+    platforms = state.get("platforms") or [state.get("platform", "linkedin")]
+    master_platform = state.get("master_platform") or platforms[0]
+    
+    # Generate content group ID for linking tasks
+    content_group_id = f"grp_{uuid.uuid4().hex[:8]}"
+    
+    # If only one platform, no adaptation needed
+    if len(platforms) <= 1:
+        logger.info(f"Single platform ({master_platform}), skipping adaptation")
+        return {
+            "adapted_content": {master_platform: master},
+            "content_group_id": content_group_id,
+        }
+    
+    # Get other platforms that need adaptation
+    other_platforms = [p for p in platforms if p != master_platform]
+    logger.info(f"Adapting master ({master_platform}) for: {other_platforms}")
+    
+    # Platform-specific guidelines for LLM
+    platform_guidelines = {
+        "linkedin": "Professional tone, 150-300 words, line breaks for readability",
+        "twitter": "Punchy and concise, max 280 characters, 1-2 hashtags only",
+        "instagram": "Authentic and visual-first, 125-150 chars, strong hashtags (up to 10)",
+        "tiktok": "Casual and trendy, hook in first line, short and punchy",
+        "facebook": "Community-focused, conversational, moderate length",
+    }
+    
+    # Build adaptation prompt
+    guidelines_text = "\n".join(
+        f"- {p.upper()}: {platform_guidelines.get(p, 'Adapt appropriately')}"
+        for p in other_platforms
+    )
+    
+    prompt = f"""Adapt this {master_platform.upper()} post for other social media platforms.
+
+ORIGINAL {master_platform.upper()} POST:
+{master.get('text', '')}
+
+ORIGINAL HASHTAGS: {' '.join(master.get('hashtags', []))}
+
+Adapt for these platforms, following each platform's conventions:
+{guidelines_text}
+
+IMPORTANT: Return ONLY valid JSON in this exact format (no markdown, no explanation):
+{{
+    "{other_platforms[0]}": {{"text": "adapted content here", "hashtags": ["#tag1", "#tag2"]}}{(',' + chr(10) + '    ').join(f'"{p}": {{"text": "...", "hashtags": [...]}}' for p in other_platforms[1:]) if len(other_platforms) > 1 else ''}
+}}
+"""
+
+    # Try LLM adaptation
+    try:
+        from app.agents.base import get_llm
+        
+        llm = get_llm(streaming=False)
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        content = response.content.strip()
+        
+        # Extract JSON from response (handle markdown code blocks)
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+        
+        # Find JSON object
+        start = content.find('{')
+        end = content.rfind('}') + 1
+        
+        if start != -1 and end > start:
+            json_str = content[start:end]
+            adaptations = json.loads(json_str)
+            
+            # Validate and clean adaptations
+            for platform in other_platforms:
+                if platform in adaptations:
+                    # Ensure required fields
+                    if "text" not in adaptations[platform]:
+                        adaptations[platform]["text"] = master.get("text", "")
+                    if "hashtags" not in adaptations[platform]:
+                        adaptations[platform]["hashtags"] = []
+                    adaptations[platform]["platform"] = platform
+                    adaptations[platform]["adapted_from"] = master_platform
+                else:
+                    # Platform missing from LLM response, use fallback
+                    logger.warning(f"LLM didn't provide adaptation for {platform}, using fallback")
+                    adaptations[platform] = _create_simple_adaptation(master, platform)
+            
+            logger.info(f"Successfully adapted content for {len(adaptations)} platforms via LLM")
+        else:
+            raise ValueError("No JSON object found in response")
+            
+    except (json.JSONDecodeError, ValueError, Exception) as e:
+        # Fallback: rule-based adaptation
+        logger.warning(f"LLM adaptation failed ({e}), using rule-based fallback")
+        adaptations = {}
+        for platform in other_platforms:
+            adaptations[platform] = _create_simple_adaptation(master, platform)
+    
+    # Combine master + adaptations
+    all_content = {master_platform: master}
+    all_content.update(adaptations)
+    
+    return {
+        "adapted_content": all_content,
+        "content_group_id": content_group_id,
+    }
+
+
+# =============================================================================
+# TASK CREATION NODE (Multi-Platform Support)
 # =============================================================================
 
 async def create_task_node(state: ContentWorkflowState) -> dict:
     """
-    Create workspace task with the final content.
+    Create workspace tasks for all platforms.
     
-    Saves the content as a pending_approval task for user review.
+    Handles both single-platform (backward compatible) and multi-platform cases.
+    Creates one task per platform, linked by content_group_id.
+    Tracks failures individually so partial success is possible.
+    
+    LangGraph standard: Uses partial state updates, errors don't fail entire workflow.
     """
     if state.get("error"):
         return {
@@ -778,20 +1188,28 @@ async def create_task_node(state: ContentWorkflowState) -> dict:
             ]
         }
     
-    logger.info("Creating workspace task")
+    logger.info("Creating workspace tasks")
     
-    final_content = state.get("final_content", {})
-    if not final_content:
-        return {
-            "messages": [
-                HumanMessage(content="No content generated to save as task.")
-            ]
-        }
-    
-    platform = final_content.get("platform", "social")
+    # Get content for all platforms
+    adapted_content = state.get("adapted_content", {})
+    content_group_id = state.get("content_group_id")
     content_type = state.get("content_type", "post")
+    request = state.get("request", "Content")
     
-    # Map to task type
+    # Fallback to single-platform if no adapted_content
+    if not adapted_content:
+        final_content = state.get("final_content", {})
+        if final_content:
+            platform = final_content.get("platform", "linkedin")
+            adapted_content = {platform: final_content}
+        else:
+            return {
+                "messages": [
+                    HumanMessage(content="No content generated to save as task.")
+                ]
+            }
+    
+    # Task type mapping
     task_type_map = {
         ("linkedin", "post"): "linkedin_post",
         ("twitter", "post"): "tweet",
@@ -800,83 +1218,133 @@ async def create_task_node(state: ContentWorkflowState) -> dict:
         ("facebook", "post"): "social_post",
         ("tiktok", "post"): "social_post",
     }
-    task_type = task_type_map.get((platform, content_type), "social_post")
     
-    # Build task content payload
-    content_payload = {
-        "text": final_content.get("text", ""),
-        "hashtags": [h.lstrip('#') for h in final_content.get("hashtags", [])],
-        "platform": platform,
-        # Include research metadata
-        "_research": final_content.get("research_insights", {}),
-        "_evaluation_score": final_content.get("evaluation_score", 0),
-        "_iterations": final_content.get("iterations_needed", 1),
-    }
+    # Import task tools
+    from app.tools.task import set_agent_context, clear_agent_context, create_task
     
-    # Try to create the task
+    # Set agent context once for all tasks
+    user_id = state.get("user_id")
+    agent_slug = state.get("agent_slug", "soshie")
+    
+    if user_id:
+        set_agent_context(
+            agent_slug=agent_slug,
+            user_id=user_id,
+        )
+    
+    # Create task for each platform
+    task_ids = []
+    failed_platforms = []
+    created_tasks = []
+    
     try:
-        from app.tools.task import AgentContext, create_task
-        
-        # Set agent context if we have user info
-        user_id = state.get("user_id")
-        agent_slug = state.get("agent_slug", "soshie")
-        
-        if user_id:
-            AgentContext.set_current(AgentContext(
-                agent_slug=agent_slug,
-                user_id=user_id,
-            ))
-        
-        # Create task
-        result = await create_task.ainvoke({
-            "task_type": task_type,
-            "title": f"{platform.title()} Post: {state.get('request', 'Content')[:50]}",
-            "content": content_payload,
-        })
-        
-        # Clear context
-        AgentContext.clear()
-        
-        if result.get("success"):
-            task_id = result.get("task_id")
-            logger.info(f"Created task {task_id}")
+        for platform, content in adapted_content.items():
+            task_type = task_type_map.get((platform, content_type), "social_post")
             
-            # Build success message for supervisor
-            message = f"""Content created and saved to your Workspace!
-
-**{platform.title()} Post:**
-{final_content.get('text', '')[:200]}{'...' if len(final_content.get('text', '')) > 200 else ''}
-
-**Hashtags:** {' '.join(final_content.get('hashtags', [])[:5])}
-
-**Quality Score:** {final_content.get('evaluation_score', 0):.1f}/10
-
-**Research Insights:**
-- Best time to post: {final_content.get('research_insights', {}).get('best_posting_time', 'See workspace')}
-- Tip: {final_content.get('research_insights', {}).get('content_tip', '')}
-
-📋 Task saved! Check your Workspace to review and approve.
-"""
+            # Build task content payload
+            content_payload = {
+                "text": content.get("text", ""),
+                "hashtags": [h.lstrip('#') for h in content.get("hashtags", [])],
+                "platform": platform,
+                "_content_group_id": content_group_id,  # Link related tasks
+                "_adapted_from": content.get("adapted_from"),
+                "_research": content.get("research_insights", {}),
+                "_evaluation_score": content.get("evaluation_score", 0),
+            }
             
-            return {
-                "task_id": task_id,
-                "messages": [HumanMessage(content=message)],
-            }
-        else:
-            return {
-                "messages": [
-                    HumanMessage(content=f"Content created but couldn't save task: {result.get('error')}")
-                ]
-            }
+            try:
+                result = await create_task.ainvoke({
+                    "task_type": task_type,
+                    "title": f"{platform.title()} Post: {request[:40]}",
+                    "content": content_payload,
+                })
+                
+                if result.get("success"):
+                    task_id = result.get("task_id")
+                    task_ids.append(task_id)
+                    created_tasks.append({
+                        "platform": platform,
+                        "task_id": task_id,
+                        "text_preview": content.get("text", "")[:100],
+                    })
+                    logger.info(f"Created task {task_id} for {platform}")
+                else:
+                    failed_platforms.append(platform)
+                    logger.warning(f"Failed to create task for {platform}: {result.get('error')}")
+                    
+            except Exception as e:
+                failed_platforms.append(platform)
+                logger.error(f"Error creating task for {platform}: {e}")
+                
+    finally:
+        clear_agent_context()
     
-    except Exception as e:
-        logger.error(f"Error creating task: {e}")
-        # Still return the content even if task creation fails
+    # Build response message based on results
+    if not task_ids:
+        # All failed
         return {
+            "task_ids": [],
+            "failed_platforms": failed_platforms,
             "messages": [
-                HumanMessage(content=f"Content created:\n\n{final_content.get('text', '')}\n\n(Could not save as task: {str(e)})")
-            ]
+                HumanMessage(content=f"Could not create tasks for any platform. Platforms attempted: {', '.join(failed_platforms)}")
+            ],
         }
+    
+    # Build success message
+    platforms_str = ", ".join(t["platform"].title() for t in created_tasks)
+    
+    message_parts = [
+        f"Content created and saved to your Workspace!",
+        f"",
+        f"**Created {len(created_tasks)} task(s):** {platforms_str}",
+    ]
+    
+    # Show preview of master content
+    master_platform = state.get("master_platform") or list(adapted_content.keys())[0]
+    master_content = adapted_content.get(master_platform, {})
+    if master_content:
+        message_parts.extend([
+            f"",
+            f"**Master Post ({master_platform.title()}):**",
+            f"{master_content.get('text', '')[:200]}{'...' if len(master_content.get('text', '')) > 200 else ''}",
+            f"",
+            f"**Hashtags:** {' '.join(master_content.get('hashtags', [])[:5])}",
+        ])
+        
+        # Show research insights if available
+        research = master_content.get("research_insights", {})
+        if research:
+            message_parts.extend([
+                f"",
+                f"**Research Insights:**",
+                f"- Best time: {research.get('best_posting_time', 'See workspace')}",
+            ])
+    
+    # Note about other platforms if multi-platform
+    if len(created_tasks) > 1:
+        other_platforms = [t["platform"].title() for t in created_tasks if t["platform"] != master_platform]
+        if other_platforms:
+            message_parts.extend([
+                f"",
+                f"**Also adapted for:** {', '.join(other_platforms)}",
+            ])
+    
+    # Note failures if any
+    if failed_platforms:
+        message_parts.extend([
+            f"",
+            f"*Could not create tasks for: {', '.join(failed_platforms)}*",
+        ])
+    
+    message_parts.append("")
+    message_parts.append("Check your Workspace to review and approve.")
+    
+    return {
+        "task_ids": task_ids,
+        "task_id": task_ids[0] if task_ids else None,  # Backward compatibility
+        "failed_platforms": failed_platforms,
+        "messages": [HumanMessage(content="\n".join(message_parts))],
+    }
 
 
 # =============================================================================
@@ -887,21 +1355,30 @@ def create_content_workflow(
     checkpointer: Optional[BaseCheckpointSaver] = None
 ) -> StateGraph:
     """
-    Create the content creation workflow.
+    Create the content creation workflow with multi-platform support.
     
     This workflow implements:
+    0. Request validation - Self-describing entry: checks platforms, support, connections
     1. Parallel research - Uses asyncio.gather() to run all 4 research tasks simultaneously
     2. Prompt chaining - Sequential: brief -> draft -> polish
     3. Evaluator-optimizer loop - evaluate -> refine (max 3x until quality passes)
+    4. Multi-platform adaptation - Create master content, adapt for other platforms in single LLM call
+    
+    Self-Describing Pattern:
+        The workflow returns workflow_status and capabilities so the supervisor can handle
+        ANY validation failure gracefully without hardcoded conditions.
     
     Workflow Flow:
-        Entry -> parallel_research (runs hashtags, timing, ideas, competitor simultaneously)
+        Entry -> validate_request (self-describing validation)
+              -> [if not success: END with status + capabilities for supervisor]
+              -> parallel_research (runs hashtags, timing, ideas, competitor simultaneously)
               -> validate_research (check we have data)
               -> create_brief (synthesize research into brief)
               -> generate_draft (LLM creates content)
               -> evaluate_content (LLM grades quality)
               -> [if pass: polish_final | if fail: refine_content -> re-evaluate]
-              -> create_task (save to workspace)
+              -> adapt_for_platforms (create adaptations for other platforms)
+              -> create_task (save all platforms to workspace)
               -> End
     
     Args:
@@ -916,6 +1393,9 @@ def create_content_workflow(
     # ADD NODES
     # ==========================================================================
     
+    # Entry: Self-describing validation (checks platforms, support, connections)
+    workflow.add_node("validate_request", validate_request)
+    
     # Research phase - single node that runs all 4 research tasks in parallel
     # using asyncio.gather() for true simultaneous execution
     workflow.add_node("parallel_research", run_parallel_research)
@@ -927,14 +1407,30 @@ def create_content_workflow(
     workflow.add_node("evaluate_content", evaluate_content)
     workflow.add_node("refine_content", refine_content)
     workflow.add_node("polish_final", polish_final)
+    
+    # Multi-platform adaptation (new node)
+    workflow.add_node("adapt_for_platforms", adapt_for_platforms)
+    
+    # Task creation (handles multiple platforms)
     workflow.add_node("create_task", create_task_node)
     
     # ==========================================================================
     # ADD EDGES
     # ==========================================================================
     
-    # Entry: Start with parallel research (modern LangGraph API)
-    workflow.add_edge(START, "parallel_research")
+    # Entry: Start with self-describing validation
+    workflow.add_edge(START, "validate_request")
+    
+    # Conditional: if validation passes (success), proceed; otherwise halt
+    # The supervisor reads workflow_status to handle non-success cases
+    workflow.add_conditional_edges(
+        "validate_request",
+        route_after_validation,
+        {
+            "parallel_research": "parallel_research",
+            END: END,
+        }
+    )
     
     # Research phase: parallel -> validate
     workflow.add_edge("parallel_research", "validate_research")
@@ -957,8 +1453,9 @@ def create_content_workflow(
     # Refine loops back to evaluate (max 3 iterations enforced by router)
     workflow.add_edge("refine_content", "evaluate_content")
     
-    # Final: Polish -> Task creation -> END
-    workflow.add_edge("polish_final", "create_task")
+    # Final: Polish -> Adapt -> Task creation -> END
+    workflow.add_edge("polish_final", "adapt_for_platforms")
+    workflow.add_edge("adapt_for_platforms", "create_task")
     workflow.add_edge("create_task", END)
     
     # ==========================================================================
@@ -1025,24 +1522,45 @@ async def run_content_workflow(
     """
     workflow = create_content_workflow(checkpointer)
     
-    # Initial state
+    # Initial state with multi-platform support
+    # For backward compatibility, single platform call sets platforms = [platform]
     initial_state: ContentWorkflowState = {
         "request": request,
-        "platform": platform,
         "content_type": content_type,
         "user_id": user_id,
         "agent_slug": agent_slug,
+        # Multi-platform fields
+        "platforms": [platform],
+        "master_platform": platform,
+        # Connection check fields
+        "connections_checked": False,
+        "connected_platforms": [],
+        "disconnected_platforms": [],
+        "awaiting_user_choice": False,
+        # Legacy single-platform field (kept for compatibility)
+        "platform": platform,
+        # Research results
         "hashtag_research": None,
         "timing_research": None,
         "content_ideas": None,
         "competitor_insights": None,
+        # Pipeline stages
         "content_brief": None,
         "draft_content": None,
         "evaluation": None,
         "iteration_count": 0,
+        # Multi-platform output
+        "master_content": None,
+        "adapted_content": None,
+        "content_group_id": None,
+        "task_ids": [],
+        "failed_platforms": [],
+        # Legacy single-platform fields
         "final_content": None,
         "task_id": None,
+        # Messages, UI actions, and error
         "messages": [],
+        "ui_actions": [],
         "error": None,
     }
     

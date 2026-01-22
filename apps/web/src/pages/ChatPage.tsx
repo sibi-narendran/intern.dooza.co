@@ -143,7 +143,7 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
  */
 function UIActionCard({ action }: { action: UIAction }) {
   if (isConnectionPromptAction(action)) {
-    return (
+  return (
       <div className="ui-action-card ui-action-card--connection">
         <div className="ui-action-card__header">
           <Link2 size={18} />
@@ -175,13 +175,13 @@ function UIActionCard({ action }: { action: UIAction }) {
             View in Workspace <ExternalLink size={14} />
           </a>
         </div>
-      </div>
-    )
-  }
-  
+    </div>
+  )
+}
+
   if (isPublishResultAction(action)) {
     const isSuccess = action.success
-    return (
+  return (
       <div className={`ui-action-card ui-action-card--publish ${isSuccess ? 'ui-action-card--success' : 'ui-action-card--error'}`}>
         <div className="ui-action-card__header">
           {isSuccess ? (
@@ -190,7 +190,7 @@ function UIActionCard({ action }: { action: UIAction }) {
             <AlertCircle size={18} style={{ color: '#dc2626' }} />
           )}
           <span>{isSuccess ? 'Published!' : 'Publish Failed'}</span>
-        </div>
+      </div>
         <p className="ui-action-card__platform-name">
           {action.platform.charAt(0).toUpperCase() + action.platform.slice(1)}
         </p>
@@ -202,10 +202,10 @@ function UIActionCard({ action }: { action: UIAction }) {
         {!isSuccess && action.error && (
           <p className="ui-action-card__error">{action.error}</p>
         )}
-      </div>
-    )
-  }
-  
+    </div>
+  )
+}
+
   return null
 }
 
@@ -281,9 +281,9 @@ function MessageBubble({
       <div 
         className="message-bubble__avatar"
         style={{
-          background: isUser 
-            ? 'var(--primary-600)' 
-            : (agent?.gradient || 'linear-gradient(135deg, #8b5cf6, #a78bfa)'),
+        background: isUser 
+          ? 'var(--primary-600)' 
+          : (agent?.gradient || 'linear-gradient(135deg, #8b5cf6, #a78bfa)'),
         }}
       >
         {isUser ? (
@@ -323,15 +323,15 @@ function MessageBubble({
                 ))}
               </div>
             )}
-            
+                
             {/* Message content */}
             {message.content && (
               <div className="message-bubble__text">
-                <MarkdownRenderer content={message.content} />
-                {message.isStreaming && (
+                  <MarkdownRenderer content={message.content} />
+                  {message.isStreaming && (
                   <span className="message-bubble__cursor" />
-                )}
-              </div>
+                  )}
+                </div>
             )}
             
             {/* UI Actions - rendered directly from backend */}
@@ -339,9 +339,9 @@ function MessageBubble({
               <div className="message-bubble__ui-actions">
                 {message.uiActions.map((action, idx) => (
                   <UIActionCard key={`action-${idx}`} action={action} />
-                ))}
-              </div>
-            )}
+                    ))}
+                  </div>
+                )}
             
             {/* Streaming dots */}
             {message.isStreaming && !isWorking && (
@@ -563,10 +563,10 @@ export default function ChatPage() {
           onStructuredResponse: (response: StructuredResponse) => {
             // Update message with UI actions from backend
             if (response.ui_actions && response.ui_actions.length > 0) {
-              setMessages(prev => prev.map((msg, idx) => {
-                if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
+            setMessages(prev => prev.map((msg, idx) => {
+              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
                 return { ...msg, uiActions: response.ui_actions }
-              }))
+            }))
             }
           },
           

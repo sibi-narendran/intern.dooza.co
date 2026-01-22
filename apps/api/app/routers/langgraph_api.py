@@ -112,7 +112,7 @@ def _get_agent_graph(agent_slug: str):
     Each agent is compiled once with the checkpointer and reused.
     
     Args:
-        agent_slug: Agent identifier (e.g., 'seomi', 'penn')
+        agent_slug: Agent identifier (e.g., 'soshie', 'penn')
         
     Returns:
         Compiled LangGraph workflow
@@ -190,7 +190,7 @@ def setup_langgraph_routes(app: FastAPI):
         Invoke an agent synchronously.
         
         Path parameters:
-            agent_slug: Agent identifier (e.g., 'seomi', 'penn')
+            agent_slug: Agent identifier (e.g., 'soshie', 'penn')
         
         Request body:
         {
@@ -244,7 +244,7 @@ def setup_langgraph_routes(app: FastAPI):
         Stream agent response via SSE with native LangGraph events.
         
         Path parameters:
-            agent_slug: Agent identifier (e.g., 'seomi', 'penn')
+            agent_slug: Agent identifier (e.g., 'soshie', 'penn')
         
         This provides full visibility into:
         - on_chat_model_stream: Token streaming from ALL agents (supervisor + specialists)
@@ -292,6 +292,10 @@ def setup_langgraph_routes(app: FastAPI):
             # Track final state for structured_response event
             final_state = {}
             
+            # Track content that was already emitted to avoid duplicates
+            # This handles the case where LLM output is streamed AND added to state
+            emitted_content_hashes = set()
+            
             try:
                 async for event in graph.astream_events(
                     input_data,
@@ -307,16 +311,18 @@ def setup_langgraph_routes(app: FastAPI):
                     metadata = event.get("metadata", {})
                     
                     # For chat model stream events, extract the actual content
+                    # With create_react_agent, streaming is from the main agent node
                     if event_type == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk")
                         content = getattr(chunk, "content", "") if chunk else ""
+                        node_name = metadata.get("langgraph_node", "")
                         
                         # Build clean event with extracted content
                         clean_event = {
                             "event": event_type,
                             "content": content,
                             "metadata": {
-                                "langgraph_node": metadata.get("langgraph_node", ""),
+                                "langgraph_node": node_name,
                                 "langgraph_step": metadata.get("langgraph_step", 0),
                             },
                             "name": event.get("name", ""),
@@ -325,7 +331,7 @@ def setup_langgraph_routes(app: FastAPI):
                     
                     # Handle on_chat_model_end for non-streaming models
                     # When streaming=False, LangGraph emits complete response in on_chat_model_end
-                    # Frontend must handle both on_chat_model_stream (incremental) and on_chat_model_end (complete)
+                    # With create_react_agent, there's no string-based routing to filter
                     elif event_type == "on_chat_model_end":
                         output = event.get("data", {}).get("output")
                         content = ""
@@ -346,8 +352,12 @@ def setup_langgraph_routes(app: FastAPI):
                                 content = "".join(text_parts)
                         
                         if content:
+                            # Track this content to avoid duplicate emission at the end
+                            content_hash = hash(content.strip())
+                            emitted_content_hashes.add(content_hash)
+                            
                             clean_event = {
-                                "event": event_type,  # Preserve original event type
+                                "event": event_type,
                                 "content": content,
                                 "metadata": {
                                     "langgraph_node": metadata.get("langgraph_node", ""),
@@ -416,17 +426,45 @@ def setup_langgraph_routes(app: FastAPI):
                             }
                             yield f"data: {json.dumps(clean_event)}\n\n"
                 
-                # Emit structured_response event at end of stream
-                # This contains ui_actions and connections for frontend rendering
+                # Emit the final response message from state if not already streamed
+                # With create_react_agent, responses are typically streamed, but we check
+                # in case a non-streaming model was used
                 if final_state:
-                    structured_response = {
-                        "event": "structured_response",
-                        "ui_actions": final_state.get("ui_actions", []),
-                        "connections": final_state.get("connections"),
-                        "workflow_result": final_state.get("workflow_result"),
-                        "error": final_state.get("error"),
-                    }
-                    yield f"data: {json.dumps(structured_response)}\n\n"
+                    messages = final_state.get("messages", [])
+                    if messages:
+                        # Get the last message (the response)
+                        last_msg = messages[-1] if messages else None
+                        if last_msg and hasattr(last_msg, 'content'):
+                            content = last_msg.content
+                            # Check if it's an AIMessage with actual content
+                            if content and hasattr(last_msg, '__class__') and last_msg.__class__.__name__ == 'AIMessage':
+                                # Don't re-emit if this content was already streamed
+                                content_hash = hash(content.strip())
+                                if content_hash not in emitted_content_hashes:
+                                    response_event = {
+                                        "event": "on_chat_model_end",
+                                        "content": content,
+                                        "metadata": {
+                                            "langgraph_node": "agent",  # Agent node in create_react_agent
+                                            "is_final_response": True,
+                                        },
+                                        "name": f"{agent_slug}_response",
+                                    }
+                                    yield f"data: {json.dumps(response_event)}\n\n"
+                                else:
+                                    logger.debug(f"Skipping duplicate final emission: {content[:50]}...")
+                
+                # Emit structured_response event at end of stream
+                # Note: With create_react_agent, tool results are in ToolMessage objects
+                # within state["messages"], not in separate state fields.
+                # Frontend should use on_tool_end events for tool-specific data.
+                # This event is kept for backwards compatibility and potential future use.
+                structured_response = {
+                    "event": "structured_response",
+                    "ui_actions": [],
+                    "error": final_state.get("error") if final_state else None,
+                }
+                yield f"data: {json.dumps(structured_response)}\n\n"
                 
                 yield "data: [DONE]\n\n"
                 

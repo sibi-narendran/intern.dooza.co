@@ -220,8 +220,8 @@ export async function streamChat(
           if (eventType === 'on_chain_start') {
             const langgraphNode = metadata.langgraph_node
             if (langgraphNode) {
-              const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
-              if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
+            const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
+            if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
                 callbacks.onNodeStart?.(langgraphNode)
               }
             }

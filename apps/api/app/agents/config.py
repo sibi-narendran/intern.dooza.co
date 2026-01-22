@@ -24,7 +24,7 @@ class AgentConfig:
     - Configure UI appearance
     
     Attributes:
-        slug: Unique identifier (e.g., 'seomi', 'penn')
+        slug: Unique identifier (e.g., 'soshie', 'penn')
         name: Display name (e.g., 'Seomi', 'Penn')
         role: Short role description (e.g., 'SEO Expert')
         description: Longer description of capabilities

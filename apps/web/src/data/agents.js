@@ -32,22 +32,6 @@ export const agents = [
         ]
     },
     {
-        id: 'seomi',
-        name: 'Seomi',
-        role: 'SEO Expert',
-        gradient: 'linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)',
-        avatar: 'https://api.dicebear.com/7.x/lorelei/svg?seed=Sarah&backgroundColor=c0aede',
-        desc: 'Analyzes keywords and optimizes content for search rankings.',
-        integrations: ['Google Search Console', 'Google Analytics', 'Ahrefs', 'WordPress'],
-        capabilities: [
-            'Pull real-time data from Google Search Console & Analytics',
-            'Auto-update meta titles, descriptions, and tags on WordPress',
-            'Monitor keyword rankings and alert you on position changes',
-            'Identify and fix technical SEO issues automatically',
-            'Generate and submit XML sitemaps to search engines'
-        ]
-    },
-    {
         id: 'cassie',
         name: 'Cassie',
         role: 'Support Agent',

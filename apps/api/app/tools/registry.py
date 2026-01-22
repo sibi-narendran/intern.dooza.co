@@ -207,19 +207,6 @@ class ToolRegistry:
             
             logger.info("Initializing tool registry...")
             
-            # Import and register SEO tools
-            try:
-                from app.tools.seo import get_seo_tools
-                seo_tools = get_seo_tools()
-                for tool in seo_tools:
-                    try:
-                        self._register_internal(tool)
-                    except ValueError as e:
-                        logger.warning(f"Skipping SEO tool: {e}")
-                logger.info(f"Registered {len(seo_tools)} SEO tools")
-            except ImportError as e:
-                logger.warning(f"Could not load SEO tools: {e}")
-            
             # Import and register Social tools
             try:
                 from app.tools.social import get_social_tools

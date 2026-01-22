@@ -2,8 +2,8 @@
 Dooza AI Tools Module
 
 Provides tool implementations for agents:
-- SEO tools: URL analysis, meta tags, headings, images, keywords
 - Task tools: Create workspace tasks for user review
+- Social tools: Publishing to social platforms
 - Server-Driven UI schemas for frontend rendering
 
 Note: Delegation is handled by langgraph-supervisor, not custom tools.
@@ -19,7 +19,6 @@ from app.tools.base import (
     create_tool,
 )
 from app.tools.registry import ToolRegistry, get_tool_registry, reset_tool_registry
-from app.tools.seo import get_seo_tools
 from app.tools.task import (
     create_task,
     get_task_types,
@@ -56,7 +55,6 @@ __all__ = [
     "get_tool_registry",
     "reset_tool_registry",
     # Tool factories
-    "get_seo_tools",
     "get_social_publish_tools",
     "get_connection_tools",
     # Task tools

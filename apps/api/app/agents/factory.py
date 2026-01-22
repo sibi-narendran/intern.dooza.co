@@ -30,7 +30,7 @@ _cache_lock = threading.Lock()
 CACHE_TTL = 300  # 5 minutes
 
 # Agent types - derived from registry for supervisors
-FALLBACK_AGENTS: FrozenSet[str] = frozenset({"pam", "penn", "seomi", "cassie", "dexter", "soshie"})
+FALLBACK_AGENTS: FrozenSet[str] = frozenset({"pam", "penn", "cassie", "dexter", "soshie"})
 
 def _get_supervisor_slugs() -> FrozenSet[str]:
     """Get supervisor slugs from registry."""
@@ -50,7 +50,7 @@ def get_supervisor_app(agent_slug: str, checkpointer=None):
     Delegates to AgentRegistry for lazy loading and caching.
     
     Args:
-        agent_slug: The agent identifier (e.g., 'seomi')
+        agent_slug: The agent identifier (e.g., 'soshie')
         checkpointer: Optional checkpointer for memory persistence
         
     Returns:
@@ -171,18 +171,6 @@ def _get_supervisor_config(agent_slug: str) -> Dict[str, Any]:
             "id": None,
             "slug": agent_slug,
             "name": agent_slug.capitalize(),
-            "is_supervisor": True,
-        }
-    
-    # Try to get detailed config from the agent module
-    if agent_slug == "seomi":
-        from app.agents.seomi import SEOMI_CONFIG
-        return {
-            "id": None,
-            "slug": SEOMI_CONFIG["slug"],
-            "name": SEOMI_CONFIG["name"],
-            "description": SEOMI_CONFIG["description"],
-            "system_prompt": "",
             "is_supervisor": True,
         }
     

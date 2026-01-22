@@ -1,45 +1,24 @@
 """
 Dooza AI Agents Module
 
-This module provides the agent system using LangGraph's supervisor pattern.
+This module provides AI agents using LangGraph patterns:
 
-Agent Hierarchy:
-- Supervisor (user-facing): SEOmi - routes to specialists
-- Specialists (hidden): seo_tech, seo_content, seo_analytics
+Agents:
+- Soshie: Tool-calling agent using create_react_agent with create_social_content tool
 
 Usage:
-    from app.agents import get_seomi_app
+    from app.agents import get_soshie_app
     
-    app = get_seomi_app(checkpointer=checkpointer)
+    app = get_soshie_app(checkpointer=checkpointer)
     result = await app.ainvoke({"messages": [HumanMessage(content="...")]}, config)
 """
 
-# Supervisor - Main entry point
-from app.agents.seomi import (
-    create_seomi_supervisor,
-    get_seomi_app,
-    SEOMI_CONFIG,
-)
-
-# SEO Specialists (for direct testing/use)
-from app.agents.seo_tech import create_seo_tech_agent
-from app.agents.seo_content import create_seo_content_agent
-from app.agents.seo_analytics import create_seo_analytics_agent
-
-# Soshie Supervisor
+# Soshie Agent (standard tool-calling pattern with create_react_agent)
 from app.agents.soshie import (
-    create_soshie_supervisor,
+    create_soshie_agent,
     get_soshie_app,
-    SOSHIE_CONFIG,
+    SOSHIE_SYSTEM_PROMPT,
 )
-
-# Soshie Specialists
-# Note: social_content is deprecated in favor of content_workflow for content creation
-# Kept for backwards compatibility and testing
-from app.agents.social_content import create_social_content_agent  # Deprecated
-from app.agents.social_design import create_social_design_agent
-from app.agents.social_research import create_social_research_agent
-from app.agents.social_publisher import create_social_publisher_agent
 
 # Content Evaluator (uses ContentFeedback from schemas/content_workflow.py)
 from app.agents.content_evaluator import (
@@ -91,26 +70,10 @@ from app.agents.base import get_llm, create_base_agent
 
 
 __all__ = [
-    # SEOmi Supervisor
-    "create_seomi_supervisor",
-    "get_seomi_app",
-    "SEOMI_CONFIG",
-    
-    # SEO Specialists
-    "create_seo_tech_agent",
-    "create_seo_content_agent",
-    "create_seo_analytics_agent",
-    
-    # Soshie Supervisor
-    "create_soshie_supervisor",
+    # Soshie Agent (standard tool-calling pattern)
+    "create_soshie_agent",
     "get_soshie_app",
-    "SOSHIE_CONFIG",
-    
-    # Soshie Specialists
-    "create_social_content_agent",  # Deprecated - use content_workflow
-    "create_social_design_agent",
-    "create_social_research_agent",
-    "create_social_publisher_agent",
+    "SOSHIE_SYSTEM_PROMPT",
     
     # Content Evaluator
     "ContentFeedback",

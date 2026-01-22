@@ -40,9 +40,9 @@ class AgentRegistration:
     Configuration for a registered agent.
     
     Attributes:
-        slug: Unique identifier (e.g., 'seomi', 'penn')
-        module_path: Python module path (e.g., 'app.agents.seomi')
-        factory_func: Name of function that creates the agent (e.g., 'get_seomi_app')
+        slug: Unique identifier (e.g., 'soshie', 'penn')
+        module_path: Python module path (e.g., 'app.agents.soshie')
+        factory_func: Name of function that creates the agent (e.g., 'get_soshie_app')
         agent_type: Type of agent ('supervisor', 'specialist', 'legacy')
         description: Human-readable description for logging/debugging
     """
@@ -60,19 +60,12 @@ class AgentRegistration:
 # The registry handles lazy loading, caching, and validation.
 
 AGENT_REGISTRATIONS: Dict[str, AgentRegistration] = {
-    "seomi": AgentRegistration(
-        slug="seomi",
-        module_path="app.agents.seomi",
-        factory_func="get_seomi_app",
-        agent_type="supervisor",
-        description="SEO Lead - supervises seo_tech, seo_content, seo_analytics",
-    ),
     "soshie": AgentRegistration(
         slug="soshie",
         module_path="app.agents.soshie",
         factory_func="get_soshie_app",
         agent_type="supervisor",
-        description="Social Media Lead - uses content_workflow, social_research, social_publisher, social_design",
+        description="Social Media Lead - tool-calling agent with create_social_content workflow",
     ),
     # Future agents: just add entries here
     # "penn": AgentRegistration(
@@ -101,7 +94,7 @@ class AgentRegistry:
     
     Usage:
         registry = get_agent_registry()
-        graph = registry.get_agent("seomi", checkpointer=checkpointer)
+        graph = registry.get_agent("soshie", checkpointer=checkpointer)
     """
     
     def __init__(self):
@@ -158,7 +151,7 @@ class AgentRegistry:
         to allow different checkpointers for different use cases.
         
         Args:
-            slug: Agent identifier (e.g., 'seomi')
+            slug: Agent identifier (e.g., 'soshie')
             checkpointer: Optional LangGraph checkpointer for memory
             
         Returns:

@@ -103,15 +103,31 @@ export interface StructuredResponse {
 
 /**
  * Workflow result from content_workflow or other specialists.
+ * Supports both single-platform and multi-platform content creation.
  */
 export interface WorkflowResult {
+  // Multi-platform support
+  task_ids?: string[]
+  content_group_id?: string
+  platforms?: string[]
+  master_platform?: string
+  master_content?: {
+    text?: string
+    hashtags?: string[]
+    platform?: string
+    [key: string]: unknown
+  }
+  
+  // Legacy single-platform (backward compatibility)
   task_id?: string
   final_content?: {
     content?: string
+    text?: string
     hashtags?: string[]
     title?: string
     [key: string]: unknown
   }
+  
   [key: string]: unknown
 }
 
