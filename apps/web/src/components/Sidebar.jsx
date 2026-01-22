@@ -16,7 +16,7 @@ const Sidebar = () => {
     const navItems = [
         { path: '/', icon: Home, label: 'Home', exact: true },
         { path: '/integrations', icon: Puzzle, label: 'Integrations' },
-        { path: '/knowledge', icon: Brain, label: 'Knowledge Base' },
+        { path: '/knowledge', icon: Brain, label: 'Brain' },
         { path: '/gallery', icon: Users, label: 'Workforce Gallery' },
     ];
 

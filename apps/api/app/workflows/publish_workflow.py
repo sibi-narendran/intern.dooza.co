@@ -18,7 +18,7 @@ import logging
 from typing import TypedDict, Optional, Annotated
 from uuid import UUID
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.services.composio_client import get_composio_client, PublishResult
@@ -421,8 +421,8 @@ def create_publish_workflow(
     workflow.add_edge("publish_platforms", "finalize")
     workflow.add_edge("finalize", END)
     
-    # Set entry point
-    workflow.set_entry_point("verify_task")
+    # Set entry point (modern LangGraph API)
+    workflow.add_edge(START, "verify_task")
     
     # Compile with optional checkpointer
     if checkpointer:

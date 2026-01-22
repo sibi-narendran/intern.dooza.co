@@ -23,13 +23,15 @@ Endpoints:
 import json
 import logging
 from typing import Any, Dict, Optional
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.agents.registry import get_agent_registry
 from app.core.database import get_checkpointer
+from app.core.auth import get_current_user
 from app.tools.registry import get_tool_registry
+from app.tools.task import set_agent_context, clear_agent_context
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +181,11 @@ def setup_langgraph_routes(app: FastAPI):
         return {"agents": agents}
     
     @app.post("/langserve/{agent_slug}/invoke")
-    async def invoke_agent(agent_slug: str, request: InvokeRequest) -> InvokeResponse:
+    async def invoke_agent(
+        agent_slug: str, 
+        request: InvokeRequest,
+        authorization: str = Header(...),
+    ) -> InvokeResponse:
         """
         Invoke an agent synchronously.
         
@@ -192,6 +198,9 @@ def setup_langgraph_routes(app: FastAPI):
             "config": {"configurable": {"thread_id": "unique-thread-id"}}
         }
         """
+        # Authenticate user
+        user_id = await get_current_user(authorization)
+        
         # Get the agent graph (validates and caches)
         graph = _get_agent_graph(agent_slug)
         
@@ -210,13 +219,23 @@ def setup_langgraph_routes(app: FastAPI):
         if "checkpoint_ns" not in configurable:
             configurable["checkpoint_ns"] = ""
         
-        # Standard LangGraph invocation
-        result = await graph.ainvoke(
-            request.input,
-            config={"configurable": configurable}
+        # Set agent context for tools and nodes
+        set_agent_context(
+            agent_slug=agent_slug,
+            user_id=user_id,
+            thread_id=configurable.get("thread_id"),
         )
         
-        return InvokeResponse(output=result)
+        try:
+            # Standard LangGraph invocation
+            result = await graph.ainvoke(
+                request.input,
+                config={"configurable": configurable}
+            )
+            return InvokeResponse(output=result)
+        finally:
+            # Always cleanup context
+            clear_agent_context()
     
     
     @app.post("/langserve/{agent_slug}/stream_events")
@@ -235,6 +254,12 @@ def setup_langgraph_routes(app: FastAPI):
         
         Frontend parses native events directly - no transformation needed.
         """
+        # Authenticate user from Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        user_id = await get_current_user(auth_header)
+        
         # Get the agent graph (validates and caches)
         graph = _get_agent_graph(agent_slug)
         # Parse request body
@@ -253,14 +278,29 @@ def setup_langgraph_routes(app: FastAPI):
         if "checkpoint_ns" not in configurable:
             configurable["checkpoint_ns"] = ""
         
+        # Set agent context for tools and nodes (before streaming starts)
+        set_agent_context(
+            agent_slug=agent_slug,
+            user_id=user_id,
+            thread_id=configurable.get("thread_id"),
+        )
+        
         async def event_generator():
             """Generate SSE events with native LangGraph format."""
+            # Track final state for structured_response event
+            final_state = {}
+            
             try:
                 async for event in graph.astream_events(
                     input_data,
                     config={"configurable": configurable},
                     version="v2"
                 ):
+                    # Capture chain end events to get final state
+                    if event.get("event") == "on_chain_end" and event.get("name") == "LangGraph":
+                        output = event.get("data", {}).get("output", {})
+                        if isinstance(output, dict):
+                            final_state = output
                     event_type = event.get("event", "")
                     metadata = event.get("metadata", {})
                     
@@ -374,11 +414,26 @@ def setup_langgraph_routes(app: FastAPI):
                             }
                             yield f"data: {json.dumps(clean_event)}\n\n"
                 
+                # Emit structured_response event at end of stream
+                # This contains ui_actions and connections for frontend rendering
+                if final_state:
+                    structured_response = {
+                        "event": "structured_response",
+                        "ui_actions": final_state.get("ui_actions", []),
+                        "connections": final_state.get("connections"),
+                        "workflow_result": final_state.get("workflow_result"),
+                        "error": final_state.get("error"),
+                    }
+                    yield f"data: {json.dumps(structured_response)}\n\n"
+                
                 yield "data: [DONE]\n\n"
                 
             except Exception as e:
                 logger.error(f"Stream error: {e}", exc_info=True)
                 yield f"data: {json.dumps({'event': 'error', 'data': {'message': str(e)}})}\n\n"
+            finally:
+                # Always cleanup agent context after streaming completes
+                clear_agent_context()
         
         return StreamingResponse(
             event_generator(),

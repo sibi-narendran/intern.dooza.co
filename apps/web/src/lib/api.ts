@@ -842,3 +842,170 @@ export async function deleteKnowledgeBaseDocument(docId: string): Promise<ApiRes
 
   return { data: null, error }
 }
+
+// ============================================================================
+// Brand Settings & Assets API (via FastAPI backend)
+// ============================================================================
+
+/**
+ * Brand settings for an organization.
+ * Controls brand voice, colors, and company information used by AI agents.
+ */
+export interface BrandSettings {
+  id: string
+  org_id: string
+  business_name: string | null
+  website: string | null
+  tagline: string | null
+  brand_voice: string | null
+  colors: { primary?: string; secondary?: string; tertiary?: string }
+  fonts: { heading?: string; body?: string }
+  description: string | null
+  value_proposition: string | null
+  industry: string | null
+  target_audience: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+/**
+ * Brand asset (logo, image, video, document).
+ * Stored in Supabase Storage, referenced by file_path.
+ */
+export interface BrandAsset {
+  id: string
+  org_id: string
+  asset_type: 'logo' | 'image' | 'video' | 'document' | 'font'
+  name: string
+  description: string | null
+  file_path: string
+  public_url: string | null
+  file_size: number | null
+  mime_type: string | null
+  metadata: Record<string, unknown>
+  usage_count: number
+  created_at: string | null
+}
+
+/**
+ * Get brand settings for the current user's organization.
+ */
+export async function getBrandSettings(): Promise<BrandSettings> {
+  const headers = await getAuthHeaders()
+  const response = await fetch(`${API_BASE}/v1/knowledge/brand`, { headers })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch brand settings' }))
+    throw new Error(error.detail || 'Failed to fetch brand settings')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Update brand settings for the current user's organization.
+ * Only provided fields are updated.
+ */
+export async function updateBrandSettings(
+  settings: Partial<Omit<BrandSettings, 'id' | 'org_id' | 'created_at' | 'updated_at'>>
+): Promise<BrandSettings> {
+  const headers = await getAuthHeaders()
+  const response = await fetch(`${API_BASE}/v1/knowledge/brand`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(settings)
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to update brand settings' }))
+    throw new Error(error.detail || 'Failed to update brand settings')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Get brand assets for the current user's organization.
+ * Optional filter by asset_type.
+ */
+export async function getBrandAssets(assetType?: string): Promise<BrandAsset[]> {
+  const headers = await getAuthHeaders()
+  const params = new URLSearchParams()
+  if (assetType) params.set('asset_type', assetType)
+  
+  const url = `${API_BASE}/v1/knowledge/assets${params.toString() ? '?' + params : ''}`
+  const response = await fetch(url, { headers })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch brand assets' }))
+    throw new Error(error.detail || 'Failed to fetch brand assets')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Create a new brand asset record.
+ * Note: File should be uploaded to Supabase Storage first.
+ */
+export async function createBrandAsset(asset: {
+  asset_type: 'logo' | 'image' | 'video' | 'document' | 'font'
+  name: string
+  file_path: string
+  description?: string
+  public_url?: string
+  file_size?: number
+  mime_type?: string
+  metadata?: Record<string, unknown>
+}): Promise<BrandAsset> {
+  const headers = await getAuthHeaders()
+  const response = await fetch(`${API_BASE}/v1/knowledge/assets`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(asset)
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to create brand asset' }))
+    throw new Error(error.detail || 'Failed to create brand asset')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Delete a brand asset (soft delete).
+ */
+export async function deleteBrandAsset(assetId: string): Promise<void> {
+  const headers = await getAuthHeaders()
+  const response = await fetch(`${API_BASE}/v1/knowledge/assets/${assetId}`, {
+    method: 'DELETE',
+    headers
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete brand asset' }))
+    throw new Error(error.detail || 'Failed to delete brand asset')
+  }
+}
+
+/**
+ * Get complete brand context for content creation.
+ * Used by agents and for preview purposes.
+ */
+export async function getBrandContext(): Promise<{
+  settings: BrandSettings | null
+  logo_url: string | null
+  recent_images: BrandAsset[]
+  prompt_context: string
+}> {
+  const headers = await getAuthHeaders()
+  const response = await fetch(`${API_BASE}/v1/knowledge/context`, { headers })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch brand context' }))
+    throw new Error(error.detail || 'Failed to fetch brand context')
+  }
+  
+  return response.json()
+}

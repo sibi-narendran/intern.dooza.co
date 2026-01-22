@@ -74,12 +74,12 @@ async def get_user_social_connections() -> dict:
     
     logger.info(f"User {ctx.user_id} has {len(connected)} connected platforms")
     
+    # Return structured data only - no LLM-style text
+    # Frontend renders this directly, LLM uses it for context
     return {
         "connected": connected,
         "disconnected": disconnected,
         "details": details,
-        "message": f"User has connected: {', '.join(connected) or 'none'}. "
-                   f"Not connected: {', '.join(disconnected) or 'all connected'}.",
     }
 
 

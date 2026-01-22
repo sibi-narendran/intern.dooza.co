@@ -2,14 +2,12 @@
  * Chat API Client
  * 
  * Uses standard LangGraph streaming via /stream_events endpoint.
- * Parses native LangGraph events for full visibility into:
- * - Token streaming from all agents (supervisor + specialists)
- * - Tool execution (including SEO analysis tools)
- * - Delegation events (transfer_to_* tools)
+ * Simplified architecture - backend emits structured UI actions,
+ * frontend renders directly without reconstruction.
  * 
  * Production-ready with:
  * - Type-safe event handling
- * - Full visibility into agent activity
+ * - Structured response handling (UI actions)
  * - Proper error recovery
  * - Connection cleanup
  * - Request timeouts
@@ -26,68 +24,21 @@ import {
   clearRetryQueueForThread,
   type ToolCallSummary,
 } from './persistence'
+import type { 
+  ChatStreamCallbacks, 
+  ToolCall,
+  StructuredResponse,
+  UIAction,
+} from './chat-types'
 
 // Configuration
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const MAX_MESSAGE_LENGTH = 32000
-const REQUEST_TIMEOUT_MS = 120000 // 2 minutes for long-running SEO analysis
+const REQUEST_TIMEOUT_MS = 120000 // 2 minutes for long-running operations
 
 // ============================================================================
-// Types
+// Types (for backward compatibility)
 // ============================================================================
-
-export type ChatEventType = 
-  | 'token'
-  | 'tool_start'
-  | 'tool_end'
-  | 'tool_data'  // Full structured tool results for UI rendering
-  | 'delegate'
-  | 'agent_switch'
-  | 'thinking'
-  | 'status'
-  | 'end'
-  | 'error'
-  | 'thread_id'
-  | 'metadata'
-
-export interface ChatEvent {
-  type: ChatEventType
-  /** For token events */
-  content?: string
-  /** For tool events - tool name */
-  tool?: string
-  name?: string  // LangGraph native field
-  /** For tool_start - input arguments */
-  args?: Record<string, unknown>
-  input?: Record<string, unknown>  // LangGraph native field
-  /** For tool_end - output result */
-  result?: unknown
-  output?: unknown  // LangGraph native field
-  /** Server-Driven UI schema for tool rendering */
-  ui_schema?: Record<string, unknown>
-  /** For delegation events */
-  to_agent?: string
-  from_agent?: string
-  task?: string
-  status?: string
-  thread_id?: string
-  error?: string
-  metadata?: {
-    category?: string
-    langgraph_node?: string
-    langgraph_step?: number
-    [key: string]: unknown
-  }
-}
-
-/**
- * Structured tool data for UI rendering
- */
-export interface ToolData {
-  tool: string
-  data: Record<string, unknown>
-  category: string
-}
 
 export interface Message {
   id: string
@@ -98,32 +49,16 @@ export interface Message {
   isStreaming?: boolean
 }
 
-export interface ToolCall {
-  name: string
-  args?: Record<string, unknown>
-  result?: unknown
-  status: 'pending' | 'running' | 'complete' | 'error'
-  /** Server-Driven UI schema from backend */
-  ui_schema?: Record<string, unknown>
-}
-
-export interface ChatCallbacks {
-  onToken?: (content: string, agent?: string) => void
-  onToolStart?: (toolName: string, args?: Record<string, unknown>) => void
-  /** Called when tool completes. ui_schema is the Server-Driven UI schema for rendering. */
-  onToolEnd?: (toolName: string, result?: unknown, uiSchema?: Record<string, unknown>) => void
-  onToolData?: (toolData: ToolData) => void  // Full structured data for UI rendering
+export interface ChatCallbacks extends ChatStreamCallbacks {
+  // Legacy callbacks for backward compatibility
+  onToolData?: (toolData: { tool: string; data: Record<string, unknown>; category: string }) => void
   onDelegate?: (toAgent: string) => void
   onAgentSwitch?: (agent: string) => void
-  /** Called when a workflow node starts - shows progress through workflow steps */
-  onNodeStart?: (nodeName: string, metadata?: { step?: number }) => void
-  /** Called when a workflow node completes */
-  onNodeEnd?: (nodeName: string) => void
   onStatus?: (status: string) => void
-  onThreadId?: (threadId: string) => void
-  onError?: (error: string) => void
-  onEnd?: () => void
 }
+
+// Re-export types from chat-types
+export type { ToolCall, UIAction, StructuredResponse } from './chat-types'
 
 // ============================================================================
 // Auth Helper
@@ -162,12 +97,12 @@ function validateMessage(message: string): void {
 /**
  * Stream a chat message using LangGraph's /stream_events endpoint.
  * 
- * Uses standard LangGraph astream_events() for full visibility into:
- * - All agent tokens (supervisor + specialists)
- * - Tool execution (SEO tools)
- * - Delegation (transfer_to_* tools)
+ * Simplified flow:
+ * 1. Stream tokens and tool events
+ * 2. Receive structured_response at stream end with UI actions
+ * 3. Frontend renders UI actions directly
  * 
- * @param agentSlug - The agent to chat with (e.g., 'seomi')
+ * @param agentSlug - The agent to chat with (e.g., 'soshie')
  * @param message - The user's message
  * @param callbacks - Callback functions for different event types
  * @param threadId - Optional thread ID for conversation continuity
@@ -178,7 +113,7 @@ export async function streamChat(
   message: string,
   callbacks: ChatCallbacks,
   threadId?: string
-): Promise<{ threadId: string }> {
+): Promise<{ threadId: string; uiActions?: UIAction[] }> {
   // Validate inputs
   if (!agentSlug || typeof agentSlug !== 'string') {
     throw new Error('Agent slug is required')
@@ -207,7 +142,6 @@ export async function streamChat(
   
   let response: Response
   try {
-    // Use /stream_events for full visibility (native LangGraph events)
     response = await fetch(`${API_BASE}/langserve/${agentSlug}/stream_events`, {
       method: 'POST',
       headers: {
@@ -240,8 +174,7 @@ export async function streamChat(
   
   const decoder = new TextDecoder()
   let buffer = ''
-  let currentAgent = 'agent' // Track which agent is currently active
-  let activeSpecialist = '' // Track which specialist was delegated to
+  let structuredResponse: StructuredResponse | null = null
   
   try {
     callbacks.onThreadId?.(generatedThreadId)
@@ -275,43 +208,28 @@ export async function streamChat(
           const event = JSON.parse(data)
           const eventType = event.event
           const metadata = event.metadata || {}
-          const langgraphNode = metadata.langgraph_node || ''
           
-          // Map "model" to the actual specialist name
-          const effectiveAgent = langgraphNode === 'model' && activeSpecialist 
-            ? activeSpecialist 
-            : langgraphNode || 'agent'
-          
-          // Track agent switches
-          if (effectiveAgent && effectiveAgent !== currentAgent) {
-            currentAgent = effectiveAgent
-            callbacks.onAgentSwitch?.(effectiveAgent)
+          // Handle structured_response event (new simplified flow)
+          if (eventType === 'structured_response') {
+            structuredResponse = event as StructuredResponse
+            callbacks.onStructuredResponse?.(structuredResponse)
+            continue
           }
           
-          // Handle node/chain start events - shows workflow progress
-          // These fire when entering a new node in a StateGraph workflow
-          if (eventType === 'on_chain_start' && langgraphNode) {
-            // Skip internal nodes like 'model' or 'agent' - only show workflow steps
-            const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
-            if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
-              callbacks.onNodeStart?.(langgraphNode, { step: metadata.langgraph_step })
+          // Handle workflow node events
+          if (eventType === 'on_chain_start') {
+            const langgraphNode = metadata.langgraph_node
+            if (langgraphNode) {
+              const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
+              if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
+                callbacks.onNodeStart?.(langgraphNode)
+              }
             }
           }
           
-          // Handle node/chain end events
-          // NOTE: LangGraph root completion (event.name === 'LangGraph') must be checked
-          // first because langgraphNode is also 'LangGraph' (truthy) in that case
           else if (eventType === 'on_chain_end') {
-            if (event.name === 'LangGraph') {
-              // LangGraph root completion - reset specialist tracking for conversation end
-              activeSpecialist = ''
-              // onEnd is called when stream closes, not here (prevents duplicate)
-            } else if (langgraphNode) {
-              // Reset specialist when returning to supervisor (agent node)
-              if (langgraphNode === 'agent' && activeSpecialist) {
-                activeSpecialist = ''
-              }
-              // Workflow node completion - fire callback for non-internal nodes
+            const langgraphNode = metadata.langgraph_node
+            if (langgraphNode) {
               const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
               if (!internalNodes.includes(langgraphNode)) {
                 callbacks.onNodeEnd?.(langgraphNode)
@@ -320,12 +238,10 @@ export async function streamChat(
           }
           
           // Handle chat content events
-          // - on_chat_model_stream: Incremental tokens (streaming providers)
-          // - on_chat_model_end: Complete response (non-streaming providers)
           else if (eventType === 'on_chat_model_stream' || eventType === 'on_chat_model_end') {
             const content = event.content || ''
             if (content) {
-              callbacks.onToken?.(content, effectiveAgent)
+              callbacks.onToken?.(content)
             }
           }
           
@@ -334,10 +250,9 @@ export async function streamChat(
             const toolName = event.name || ''
             const toolInput = event.input || {}
             
-            // Check for delegation (transfer_to_* tools)
+            // Check for delegation (legacy support)
             if (toolName.startsWith('transfer_to_')) {
               const targetAgent = toolName.replace('transfer_to_', '')
-              activeSpecialist = targetAgent
               callbacks.onDelegate?.(targetAgent)
             } else {
               callbacks.onToolStart?.(toolName, toolInput)
@@ -348,9 +263,9 @@ export async function streamChat(
           else if (eventType === 'on_tool_end') {
             const toolName = event.name || ''
             const toolOutput = event.output
-            const uiSchema = event.ui_schema  // Server-Driven UI schema
+            const uiSchema = event.ui_schema
             
-            // Skip delegation tool outputs (internal)
+            // Skip delegation tool outputs
             if (toolName.startsWith('transfer_to_')) {
               continue
             }
@@ -364,7 +279,6 @@ export async function streamChat(
           }
           
         } catch (parseError) {
-          // Log but don't fail on parse errors
           console.warn('Failed to parse stream event:', data)
         }
       }
@@ -373,7 +287,10 @@ export async function streamChat(
     reader.releaseLock()
   }
   
-  return { threadId: generatedThreadId }
+  return { 
+    threadId: generatedThreadId,
+    uiActions: structuredResponse?.ui_actions,
+  }
 }
 
 
@@ -392,8 +309,6 @@ export function generateMessageId(): string {
  * Format tool name for display.
  */
 export function formatToolName(toolName: string): string {
-  // 'seo_analyze_url' -> 'Seo Analyze Url'
-  // 'transfer_to_seo_tech' -> 'Transfer To Seo Tech'
   const parts = toolName.split('.')
   const name = parts[parts.length - 1]
   return name
@@ -406,14 +321,12 @@ export function formatToolName(toolName: string): string {
  * Format agent name for display.
  */
 export function formatAgentName(agentName: string): string {
-  // 'seo_tech' -> 'SEO Tech'
-  // 'agent' -> 'SEOmi' (supervisor)
   if (agentName === 'agent') {
-    return 'SEOmi'
+    return 'Agent'
   }
   return agentName
     .split('_')
-    .map(word => word.toUpperCase() === 'SEO' ? 'SEO' : word.charAt(0).toUpperCase() + word.slice(1))
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
 
@@ -455,9 +368,6 @@ export interface SaveMessageRequest {
 /**
  * Save a message to the backend.
  * On failure, queues the message for retry.
- * 
- * @param message - The message to save
- * @returns The saved message, or null if queued for retry
  */
 export async function saveMessage(message: SaveMessageRequest): Promise<SavedMessage | null> {
   const messageId = generateMessageId()
@@ -465,7 +375,6 @@ export async function saveMessage(message: SaveMessageRequest): Promise<SavedMes
   try {
     const token = await getAuthToken()
     
-    // Compress tool calls if present
     const toolCallsSummary = message.toolCalls 
       ? compressToolCalls(message.toolCalls)
       : undefined
@@ -494,7 +403,6 @@ export async function saveMessage(message: SaveMessageRequest): Promise<SavedMes
   } catch (error) {
     console.warn('Failed to save message, queuing for retry:', error)
     
-    // Queue for retry
     queueMessageForRetry({
       id: messageId,
       threadId: message.threadId,
@@ -512,7 +420,6 @@ export async function saveMessage(message: SaveMessageRequest): Promise<SavedMes
 
 /**
  * Save a message without retry (fire and forget).
- * Used for user messages where we don't want to block UI.
  */
 export async function saveMessageAsync(message: SaveMessageRequest): Promise<void> {
   saveMessage(message).catch(err => {
@@ -522,13 +429,6 @@ export async function saveMessageAsync(message: SaveMessageRequest): Promise<voi
 
 /**
  * Load messages for a thread.
- * Clears local retry queue for this thread after successful load.
- * 
- * Note: Global retry queue flush happens on page load (ChatPage),
- * so we don't need to flush here.
- * 
- * @param threadId - The thread to load messages for
- * @returns Array of messages in chronological order
  */
 export async function loadThreadMessages(threadId: string): Promise<SavedMessage[]> {
   try {
@@ -545,14 +445,12 @@ export async function loadThreadMessages(threadId: string): Promise<SavedMessage
     
     if (!response.ok) {
       if (response.status === 404) {
-        return []  // Thread doesn't exist yet (new conversation)
+        return []
       }
       throw new Error(`Failed to load messages: ${response.statusText}`)
     }
     
     const data = await response.json()
-    
-    // Clear retry queue for this thread (messages loaded successfully)
     clearRetryQueueForThread(threadId)
     
     return data.messages || []
@@ -565,10 +463,6 @@ export async function loadThreadMessages(threadId: string): Promise<SavedMessage
 
 /**
  * List user's conversation threads.
- * 
- * @param agentSlug - Optional filter by agent
- * @param limit - Max threads to return
- * @param offset - Pagination offset
  */
 export async function listThreads(
   agentSlug?: string,
@@ -615,8 +509,6 @@ export async function listThreads(
 
 /**
  * Delete a conversation thread.
- * 
- * @param threadId - The thread to delete
  */
 export async function deleteThread(threadId: string): Promise<boolean> {
   try {
@@ -636,7 +528,6 @@ export async function deleteThread(threadId: string): Promise<boolean> {
       throw new Error(`Failed to delete thread: ${response.statusText}`)
     }
     
-    // Also clear from retry queue
     clearRetryQueueForThread(threadId)
     
     return true
@@ -649,7 +540,6 @@ export async function deleteThread(threadId: string): Promise<boolean> {
 
 /**
  * Flush the retry queue by batch saving pending messages.
- * Called automatically on page load.
  */
 export async function flushRetryQueue(): Promise<void> {
   const messagesToRetry = getMessagesToRetry()
@@ -663,7 +553,6 @@ export async function flushRetryQueue(): Promise<void> {
   try {
     const token = await getAuthToken()
     
-    // Convert to API format
     const batchPayload = messagesToRetry.map(m => ({
       thread_id: m.threadId,
       agent_slug: m.agentSlug,
@@ -682,17 +571,14 @@ export async function flushRetryQueue(): Promise<void> {
     })
     
     if (response.ok) {
-      // Success - remove from queue
       removeFromRetryQueue(messagesToRetry.map(m => m.id))
       console.log('Retry queue flushed successfully')
     } else {
-      // Failed - increment retry count
       markMessagesRetried(messagesToRetry.map(m => m.id))
       console.warn('Retry queue flush failed, will retry later')
     }
     
   } catch (error) {
-    // Mark as retried (increments count)
     markMessagesRetried(messagesToRetry.map(m => m.id))
     console.warn('Retry queue flush error:', error)
   }

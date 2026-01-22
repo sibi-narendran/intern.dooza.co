@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Sequence, Annotated
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
@@ -231,7 +231,7 @@ def create_base_agent(system_prompt: Optional[str] = None, checkpointer=None):
     
     graph = StateGraph(AgentState)
     graph.add_node("agent", call_model)
-    graph.set_entry_point("agent")
+    graph.add_edge(START, "agent")  # Modern LangGraph API
     graph.add_edge("agent", END)
     
     return graph.compile(checkpointer=checkpointer)

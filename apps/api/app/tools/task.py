@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Optional, Any
 
@@ -26,17 +27,26 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# AGENT CONTEXT (Set by the chat handler before invoking agent)
+# AGENT CONTEXT (Thread-safe using contextvars)
 # =============================================================================
+
+# ContextVar provides async-safe, per-request isolation
+# Each concurrent request gets its own copy of the context
+_agent_context_var: ContextVar[Optional["AgentContext"]] = ContextVar(
+    "agent_context", default=None
+)
+
 
 class AgentContext:
     """
     Runtime context for the executing agent.
     
-    Set by the chat handler before invoking the agent graph.
+    Set by the API handler before invoking the agent graph.
     Provides agent identity and user context for tool calls.
+    
+    Uses contextvars for thread-safety in concurrent async environments.
+    Each request gets isolated context - no cross-request contamination.
     """
-    _current: Optional["AgentContext"] = None
     
     def __init__(
         self,
@@ -52,18 +62,18 @@ class AgentContext:
     
     @classmethod
     def set_current(cls, context: "AgentContext") -> None:
-        """Set the current agent context for tool execution."""
-        cls._current = context
+        """Set the current agent context for this async context."""
+        _agent_context_var.set(context)
     
     @classmethod
     def get_current(cls) -> Optional["AgentContext"]:
-        """Get the current agent context."""
-        return cls._current
+        """Get the current agent context for this async context."""
+        return _agent_context_var.get()
     
     @classmethod
     def clear(cls) -> None:
-        """Clear the current context after execution."""
-        cls._current = None
+        """Clear the current context."""
+        _agent_context_var.set(None)
 
 
 def set_agent_context(
@@ -73,12 +83,14 @@ def set_agent_context(
     thread_id: Optional[str] = None,
 ) -> AgentContext:
     """
-    Set the agent context for the current execution.
+    Set the agent context for the current async execution.
     
     Call this before invoking the agent graph so tools
     know the agent identity and user context.
     
-    Returns the created context (for use in context managers).
+    Thread-safe: Uses contextvars for per-request isolation.
+    
+    Returns the created context.
     """
     context = AgentContext(
         agent_slug=agent_slug,

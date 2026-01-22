@@ -30,7 +30,7 @@ import logging
 from typing import TypedDict, Optional, Annotated, List, Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -933,8 +933,8 @@ def create_content_workflow(
     # ADD EDGES
     # ==========================================================================
     
-    # Entry: Start with parallel research
-    workflow.set_entry_point("parallel_research")
+    # Entry: Start with parallel research (modern LangGraph API)
+    workflow.add_edge(START, "parallel_research")
     
     # Research phase: parallel -> validate
     workflow.add_edge("parallel_research", "validate_research")
