@@ -278,15 +278,17 @@ def setup_langgraph_routes(app: FastAPI):
         if "checkpoint_ns" not in configurable:
             configurable["checkpoint_ns"] = ""
         
-        # Set agent context for tools and nodes (before streaming starts)
-        set_agent_context(
-            agent_slug=agent_slug,
-            user_id=user_id,
-            thread_id=configurable.get("thread_id"),
-        )
-        
         async def event_generator():
             """Generate SSE events with native LangGraph format."""
+            # Set agent context INSIDE the generator so cleanup is guaranteed
+            # If we set it outside and StreamingResponse fails to initialize,
+            # the context would persist and contaminate subsequent requests
+            set_agent_context(
+                agent_slug=agent_slug,
+                user_id=user_id,
+                thread_id=configurable.get("thread_id"),
+            )
+            
             # Track final state for structured_response event
             final_state = {}
             

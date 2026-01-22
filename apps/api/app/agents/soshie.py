@@ -152,7 +152,7 @@ async def route_node(state: SoshieState) -> dict:
     from app.agents.base import get_llm  # Lazy import to avoid circular
     
     messages = state.get("messages", [])
-    connections = state.get("connections", {})
+    connections = state.get("connections") or {}
     
     # Build context with connection state
     connection_context = ""
@@ -365,8 +365,11 @@ async def social_publisher_node(state: SoshieState) -> dict:
     from app.agents.social_publisher import create_social_publisher_agent
     
     messages = state.get("messages", [])
-    connections = state.get("connections", {})
-    ui_actions = list(state.get("ui_actions", []))
+    # Use `or {}` to handle both missing key AND explicit None value
+    # state.get("connections", {}) only applies default if key is missing,
+    # not if key exists with value None
+    connections = state.get("connections") or {}
+    ui_actions = list(state.get("ui_actions") or [])
     
     # Check if user has any connections
     connected = connections.get("connected", [])
