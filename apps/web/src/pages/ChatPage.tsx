@@ -448,6 +448,7 @@ export default function ChatPage() {
       role: 'assistant',
       content: '',
       timestamp: new Date(),
+      toolCalls: [],
       isStreaming: true,
       agentSlug,
     }
@@ -462,7 +463,6 @@ export default function ChatPage() {
         agentSlug,
         userMessage.content,
         {
-          // Only stream text content - tool cards rendered after reload from history
           onToken: (content) => {
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
@@ -470,13 +470,34 @@ export default function ChatPage() {
             }))
           },
 
-          // Show workflow progress during streaming
+          onToolStart: (toolName, args) => {
+            setMessages(prev => prev.map((msg, idx) => {
+              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
+              const newTool: ToolCall = { name: toolName, args, status: 'running' }
+              return { ...msg, toolCalls: [...(msg.toolCalls || []), newTool] }
+            }))
+          },
+
+          onToolEnd: (toolName, toolResult) => {
+            setMessages(prev => prev.map((msg, idx) => {
+              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
+              return {
+                ...msg,
+                toolCalls: msg.toolCalls?.map(t =>
+                  t.name === toolName && t.status === 'running'
+                    ? { ...t, status: 'complete' as const, result: toolResult }
+                    : t
+                ),
+              }
+            }))
+          },
+
           onNodeStart: (nodeName) => {
             setCurrentWorkflowNode(nodeName)
           },
 
           onNodeEnd: () => {
-            // Node end is handled by next onNodeStart or onEnd
+            // Node end handled by next onNodeStart or onEnd
           },
 
           onThreadId: (id) => {
@@ -494,27 +515,19 @@ export default function ChatPage() {
 
           onEnd: () => {
             setCurrentWorkflowNode(null)
+            setMessages(prev => prev.map((msg, idx) =>
+              idx === prev.length - 1 && msg.role === 'assistant'
+                ? { ...msg, isStreaming: false }
+                : msg
+            ))
           },
         },
         currentThreadId
       )
-      
-      // Update thread ID from result
-      const finalThreadId = result.threadId || currentThreadId
-      if (finalThreadId) {
-        setThreadId(finalThreadId)
 
-        // Reload messages from history for consistent UI
-        // This ensures tool cards and images render the same as after refresh
-        try {
-          const langGraphMessages = await loadThreadMessages(agentSlug, finalThreadId)
-          if (langGraphMessages.length > 0) {
-            const chatMessages = transformLangGraphMessages(langGraphMessages)
-            setMessages(chatMessages)
-          }
-        } catch (reloadErr) {
-          console.warn('Failed to reload messages after streaming:', reloadErr)
-        }
+      // Update thread ID
+      if (result.threadId) {
+        setThreadId(result.threadId)
       }
 
     } catch (err) {
