@@ -526,18 +526,24 @@ export default function ChatPage() {
         currentThreadId
       )
       
-      // Ensure streaming flag is cleared
-      setMessages(prev => prev.map((msg, idx) => 
-        idx === prev.length - 1 && msg.role === 'assistant'
-          ? { ...msg, isStreaming: false }
-          : msg
-      ))
-      
       // Update thread ID from result
-      if (result.threadId) {
-        setThreadId(result.threadId)
+      const finalThreadId = result.threadId || currentThreadId
+      if (finalThreadId) {
+        setThreadId(finalThreadId)
+
+        // Reload messages from history for consistent UI
+        // This ensures tool cards and images render the same as after refresh
+        try {
+          const langGraphMessages = await loadThreadMessages(agentSlug, finalThreadId)
+          if (langGraphMessages.length > 0) {
+            const chatMessages = transformLangGraphMessages(langGraphMessages)
+            setMessages(chatMessages)
+          }
+        } catch (reloadErr) {
+          console.warn('Failed to reload messages after streaming:', reloadErr)
+        }
       }
-      
+
     } catch (err) {
       console.error('Chat error:', err)
       setError(err instanceof Error ? err.message : 'Failed to send message')
