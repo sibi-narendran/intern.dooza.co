@@ -7,17 +7,15 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { 
-  Send, 
-  Loader2, 
+import {
+  Send,
+  Loader2,
   CheckCircle2,
   AlertCircle,
   Bot,
   User,
   Paperclip,
   Mic,
-  ExternalLink,
-  Link2,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getAgentDetails, GalleryAgent } from '../lib/agent-api'
@@ -28,16 +26,9 @@ import {
   listThreads,
   type LangGraphMessage,
 } from '../lib/chat-api'
-import type { 
-  ChatMessage, 
-  ToolCall, 
-  UIAction,
-  StructuredResponse,
-} from '../lib/chat-types'
-import { 
-  isConnectionPromptAction, 
-  isTaskCreatedAction, 
-  isPublishResultAction,
+import type {
+  ChatMessage,
+  ToolCall,
 } from '../lib/chat-types'
 import AgentPanel from '../components/AgentPanel'
 import MarkdownRenderer from '../components/MarkdownRenderer'
@@ -138,77 +129,6 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
       )}
     </div>
   )
-}
-
-/**
- * UI Action Card - renders structured actions from backend
- */
-function UIActionCard({ action }: { action: UIAction }) {
-  if (isConnectionPromptAction(action)) {
-  return (
-      <div className="ui-action-card ui-action-card--connection">
-        <div className="ui-action-card__header">
-          <Link2 size={18} />
-          <span>Connect your accounts</span>
-        </div>
-        <p className="ui-action-card__message">{action.message}</p>
-        <div className="ui-action-card__platforms">
-          {action.platforms.map(platform => (
-            <button key={platform} className="ui-action-card__connect-btn">
-              Connect {platform.charAt(0).toUpperCase() + platform.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-    )
-  }
-  
-  if (isTaskCreatedAction(action)) {
-    return (
-      <div className="ui-action-card ui-action-card--task">
-        <div className="ui-action-card__header">
-          <CheckCircle2 size={18} style={{ color: '#16a34a' }} />
-          <span>Task Created</span>
-        </div>
-        <p className="ui-action-card__title">{action.title}</p>
-        <div className="ui-action-card__meta">
-          <span className="ui-action-card__platform">{action.platform}</span>
-          <a href={`/workspace?task=${action.task_id}`} className="ui-action-card__link">
-            View in Workspace <ExternalLink size={14} />
-          </a>
-        </div>
-    </div>
-  )
-}
-
-  if (isPublishResultAction(action)) {
-    const isSuccess = action.success
-  return (
-      <div className={`ui-action-card ui-action-card--publish ${isSuccess ? 'ui-action-card--success' : 'ui-action-card--error'}`}>
-        <div className="ui-action-card__header">
-          {isSuccess ? (
-            <CheckCircle2 size={18} style={{ color: '#16a34a' }} />
-          ) : (
-            <AlertCircle size={18} style={{ color: '#dc2626' }} />
-          )}
-          <span>{isSuccess ? 'Published!' : 'Publish Failed'}</span>
-      </div>
-        <p className="ui-action-card__platform-name">
-          {action.platform.charAt(0).toUpperCase() + action.platform.slice(1)}
-        </p>
-        {isSuccess && action.post_url && (
-          <a href={action.post_url} target="_blank" rel="noopener noreferrer" className="ui-action-card__link">
-            View Post <ExternalLink size={14} />
-          </a>
-        )}
-        {!isSuccess && action.error && (
-          <p className="ui-action-card__error">{action.error}</p>
-        )}
-    </div>
-  )
-}
-
-  return null
 }
 
 /**
@@ -336,14 +256,6 @@ function MessageBubble({
                 </div>
             )}
             
-            {/* UI Actions - rendered directly from backend */}
-            {message.uiActions && message.uiActions.length > 0 && (
-              <div className="message-bubble__ui-actions">
-                {message.uiActions.map((action, idx) => (
-                  <UIActionCard key={`action-${idx}`} action={action} />
-                    ))}
-                  </div>
-                )}
             
             {/* Streaming dots */}
             {message.isStreaming && !isWorking && (
@@ -537,7 +449,6 @@ export default function ChatPage() {
       content: '',
       timestamp: new Date(),
       toolCalls: [],
-      uiActions: [],
       isStreaming: true,
       agentSlug,
     }
@@ -588,16 +499,6 @@ export default function ChatPage() {
           
           onNodeEnd: () => {
             // Node end is handled by next onNodeStart or onEnd
-          },
-          
-          onStructuredResponse: (response: StructuredResponse) => {
-            // Update message with UI actions from backend
-            if (response.ui_actions && response.ui_actions.length > 0) {
-              setMessages(prev => prev.map((msg, idx) => {
-                if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
-                return { ...msg, uiActions: response.ui_actions }
-              }))
-            }
           },
           
           onThreadId: (id) => {
