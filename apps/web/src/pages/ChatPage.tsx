@@ -448,79 +448,52 @@ export default function ChatPage() {
       role: 'assistant',
       content: '',
       timestamp: new Date(),
-      toolCalls: [],
       isStreaming: true,
       agentSlug,
     }
-    
+
     setMessages(prev => [...prev, userMessage, assistantMessage])
     setInput('')
     setIsStreaming(true)
     setError(null)
-    
+
     try {
       const result = await streamChat(
         agentSlug,
         userMessage.content,
         {
+          // Only stream text content - tool cards rendered after reload from history
           onToken: (content) => {
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               return { ...msg, content: msg.content + content }
             }))
           },
-          
-          onToolStart: (toolName, args) => {
-            const newTool: ToolCall = { name: toolName, args, status: 'running' }
-            
-            setMessages(prev => prev.map((msg, idx) => {
-              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
-              return { ...msg, toolCalls: [...(msg.toolCalls || []), newTool] }
-            }))
-          },
-          
-          onToolEnd: (toolName, result, uiSchema) => {
-            setMessages(prev => prev.map((msg, idx) => {
-              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
-              return {
-                ...msg,
-                toolCalls: msg.toolCalls?.map(t =>
-                  t.name === toolName && t.status === 'running'
-                    ? { ...t, status: 'complete', result, ui_schema: uiSchema }
-                    : t
-                ),
-              }
-            }))
-          },
-          
+
+          // Show workflow progress during streaming
           onNodeStart: (nodeName) => {
             setCurrentWorkflowNode(nodeName)
           },
-          
+
           onNodeEnd: () => {
             // Node end is handled by next onNodeStart or onEnd
           },
-          
+
           onThreadId: (id) => {
             setThreadId(id)
           },
-          
+
           onError: (err) => {
             setError(err)
-            setMessages(prev => prev.map((msg, idx) => 
+            setMessages(prev => prev.map((msg, idx) =>
               idx === prev.length - 1 && msg.role === 'assistant'
                 ? { ...msg, isStreaming: false, content: msg.content || 'Sorry, an error occurred.' }
                 : msg
             ))
           },
-          
+
           onEnd: () => {
             setCurrentWorkflowNode(null)
-            setMessages(prev => prev.map((msg, idx) => 
-              idx === prev.length - 1 && msg.role === 'assistant'
-                ? { ...msg, isStreaming: false }
-                : msg
-            ))
           },
         },
         currentThreadId
