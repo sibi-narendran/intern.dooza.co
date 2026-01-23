@@ -799,7 +799,6 @@ def setup_langgraph_routes(app: FastAPI):
     async def register_thread(
         agent_slug: str,
         request: Request,
-        authorization: str = Header(...),
     ):
         """
         Register a new thread for user tracking.
@@ -811,8 +810,11 @@ def setup_langgraph_routes(app: FastAPI):
             thread_id: The thread ID
             title: Optional title (defaults to first message)
         """
-        # Authenticate user
-        user_id = await get_current_user(authorization)
+        # Authenticate user from Authorization header (same pattern as stream_events)
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        user_id = await get_current_user(auth_header)
         
         body = await request.json()
         thread_id = body.get("thread_id")
@@ -846,10 +848,13 @@ def setup_langgraph_routes(app: FastAPI):
         agent_slug: str,
         thread_id: str,
         request: Request,
-        authorization: str = Header(...),
     ):
         """Update thread metadata (title, etc.)."""
-        user_id = await get_current_user(authorization)
+        # Authenticate user from Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        user_id = await get_current_user(auth_header)
         body = await request.json()
         
         supabase = get_supabase_client()
@@ -877,10 +882,14 @@ def setup_langgraph_routes(app: FastAPI):
     async def delete_thread(
         agent_slug: str,
         thread_id: str,
-        authorization: str = Header(...),
+        request: Request,
     ):
         """Delete a thread (removes user tracking, checkpointer data remains)."""
-        user_id = await get_current_user(authorization)
+        # Authenticate user from Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        user_id = await get_current_user(auth_header)
         
         supabase = get_supabase_client()
         if not supabase:

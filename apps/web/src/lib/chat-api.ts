@@ -139,9 +139,12 @@ export async function streamChat(
   
   const generatedThreadId = threadId || `thread_${Date.now()}`
   
-  // Register thread for new conversations
+  // Register thread for new conversations (must complete before streaming)
   if (!threadId) {
-    registerThread(agentSlug, generatedThreadId, message.slice(0, 100)).catch(console.warn)
+    const registered = await registerThread(agentSlug, generatedThreadId, message.slice(0, 100))
+    if (!registered) {
+      console.warn('[Chat] Thread not registered - history will not persist for thread:', generatedThreadId)
+    }
   }
   
   const payload = {
@@ -314,10 +317,8 @@ export async function streamChat(
     reader.releaseLock()
   }
   
-  // Update thread title with first message if this was a new conversation
-  if (!threadId) {
-    updateThreadTitle(agentSlug, generatedThreadId, message.slice(0, 100)).catch(console.warn)
-  }
+  // Note: Thread title is already set during registerThread() call above
+  // No need for separate updateThreadTitle call
   
   return { 
     threadId: generatedThreadId,

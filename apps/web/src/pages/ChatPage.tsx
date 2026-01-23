@@ -520,7 +520,9 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming || !agentSlug) return
     
-    const currentThreadId = threadId || `thread_${Date.now()}`
+    // Pass actual threadId to streamChat - it will generate a new ID if null
+    // This allows streamChat to know if it's a new conversation and register the thread
+    const currentThreadId = threadId
     
     const userMessage: ChatMessage = {
       id: generateMessageId(),

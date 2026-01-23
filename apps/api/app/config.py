@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # OpenAI Direct (recommended for best LangGraph compatibility)
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"  # Best for agentic workflows
+    default_model: str = "gpt-4o"  # Default model fallback
     
     # OpenRouter (multi-provider gateway)
     openrouter_api_key: str = ""
