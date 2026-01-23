@@ -44,7 +44,7 @@ import {
 import { getQueuedMessageCount } from '../lib/persistence'
 import AgentPanel from '../components/AgentPanel'
 import MarkdownRenderer from '../components/MarkdownRenderer'
-import { DynamicToolRenderer } from '../components/tools'
+import { DynamicToolRenderer, ImageResultCard, isImageResult } from '../components/tools'
 import { ToolUISchema, formatSummary } from '../types/tool-ui'
 import WelcomeScreen from '../components/WelcomeScreen'
 import { formatToolName } from '../config/tool-display-names'
@@ -132,6 +132,13 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
       {tool.name === 'request_connect_integration' && isComplete && parsedResult && isIntegrationAction(parsedResult) && (
         <div className="tool-indicator__special-card">
           <IntegrationActionCard data={parsedResult} />
+        </div>
+      )}
+      
+      {/* Image generation result card - Soshie uses generate_image workflow tool */}
+      {tool.name === 'generate_image' && isComplete && parsedResult && isImageResult(parsedResult) && (
+        <div className="tool-indicator__special-card">
+          <ImageResultCard data={parsedResult} />
         </div>
       )}
     </div>

@@ -4,16 +4,19 @@ Image Generation Tools for the Image Generation Subagent
 These tools are used autonomously by the Image Generation subagent to:
 1. Load brand visual identity
 2. Create optimized prompts
-3. Generate images (stub for now)
+3. Generate images using Google's Nano Banana Pro model
 
 Tools:
 - get_brand_visuals: Load brand colors, fonts, logo from knowledge base
 - generate_image_prompt: Create an optimized prompt for image generation
-- create_image: Generate the actual image (stub - ready for API integration)
+- create_image: Generate images using Nano Banana Pro via OpenRouter
 
 Usage:
     These tools are registered with the Image Generation subagent, not Soshie directly.
     The subagent decides when and how to call them.
+    
+Configuration:
+    Uses OPENROUTER_API_KEY (recommended) for image generation.
 """
 
 from __future__ import annotations
@@ -86,10 +89,10 @@ STYLE_PROMPTS = {
 @tool
 async def get_brand_visuals() -> dict:
     """
-    Load brand visual identity from the knowledge base.
+    Load brand visual identity including logo and uploaded images.
     
-    Call this first if you need to ensure brand consistency in the generated image.
-    Returns brand colors, fonts, logo URL, and visual tone.
+    Call this first to get brand assets for image generation.
+    Returns brand colors, logo URL, and list of uploaded images you can use.
     
     Returns:
         dict with:
@@ -97,9 +100,15 @@ async def get_brand_visuals() -> dict:
         - primary_color: Primary brand color (hex)
         - secondary_color: Secondary brand color (hex)
         - accent_color: Accent color (hex)
-        - logo_url: URL to brand logo (if available)
-        - font_style: Font style preference (modern, classic, playful)
+        - logo_url: URL to brand logo (use for branded content)
+        - logo_name: Name of the logo file
+        - uploaded_images: List of available images with name, description, url
         - visual_tone: Visual tone (professional, casual, bold, minimal)
+        
+    The uploaded_images list contains images you can use as references:
+    - Pass their URLs to create_image's reference_image_urls parameter
+    - Use logo_url when creating branded content
+    - Use product/team images when relevant to the content
     """
     from app.services.knowledge_service import get_knowledge_service
     
@@ -109,10 +118,12 @@ async def get_brand_visuals() -> dict:
         return {
             "error": "no_context",
             "brand_name": "Your Brand",
-            "primary_color": "#2563EB",  # Default blue
+            "primary_color": "#2563EB",
             "secondary_color": "#1E40AF",
             "accent_color": "#F59E0B",
             "visual_tone": "professional",
+            "logo_url": None,
+            "uploaded_images": [],
         }
     
     user_id = ctx.user_id
@@ -127,21 +138,43 @@ async def get_brand_visuals() -> dict:
                 "brand_name": "Your Brand",
                 "primary_color": "#2563EB",
                 "visual_tone": "professional",
+                "logo_url": None,
+                "uploaded_images": [],
             }
         
+        # Fetch brand settings
         brand = await service.get_brand_settings(org_id)
         colors = brand.colors or {}
+        
+        # Fetch logo
+        logo = await service.get_logo(org_id)
+        
+        # Fetch uploaded images
+        images = await service.get_brand_assets(org_id, asset_type="image", limit=10)
+        
+        # Format uploaded images for the agent
+        uploaded_images = [
+            {
+                "name": img.name,
+                "description": img.description or "",
+                "url": img.public_url,
+            }
+            for img in images
+            if img.public_url
+        ]
         
         return {
             "brand_name": brand.business_name or "Your Brand",
             "primary_color": colors.get("primary", "#2563EB"),
             "secondary_color": colors.get("secondary"),
             "accent_color": colors.get("accent") or colors.get("tertiary"),
-            "logo_url": None,  # TODO: Get from brand assets
-            "font_style": "modern",  # TODO: Store in brand settings
+            "logo_url": logo.public_url if logo else None,
+            "logo_name": logo.name if logo else None,
+            "font_style": "modern",
             "visual_tone": brand.brand_voice or "professional",
             "industry": brand.industry,
             "tagline": brand.tagline,
+            "uploaded_images": uploaded_images,
         }
         
     except Exception as e:
@@ -152,6 +185,8 @@ async def get_brand_visuals() -> dict:
             "brand_name": "Your Brand",
             "primary_color": "#2563EB",
             "visual_tone": "professional",
+            "logo_url": None,
+            "uploaded_images": [],
         }
 
 
@@ -241,7 +276,7 @@ async def generate_image_prompt(
 
 
 # =============================================================================
-# IMAGE CREATION TOOL (STUB)
+# IMAGE CREATION TOOL (Nano Banana Pro)
 # =============================================================================
 
 @tool
@@ -250,38 +285,64 @@ async def create_image(
     style: str = "photo_realistic",
     aspect_ratio: str = "1:1",
     platform: str = "instagram",
-    negative_prompt: str = ""
+    negative_prompt: str = "",
+    reference_image_urls: Optional[list[str]] = None
 ) -> dict:
     """
-    Generate an image using the provided prompt.
+    Generate an image using Google's Nano Banana Pro model.
     
-    **STATUS: STUB IMPLEMENTATION**
-    This tool is ready for API integration but currently returns a placeholder.
-    When Replicate/Flux API is integrated, this will generate actual images.
+    This tool uses Google's latest image generation model (Nano Banana Pro / Gemini 3 Pro Image)
+    to create high-quality images optimized for social media platforms.
+    
+    IMPORTANT: You can pass reference images (logo, uploaded images) to influence the generation.
+    Get these URLs from get_brand_visuals() - use logo_url and uploaded_images[].url.
     
     Args:
         prompt: The full optimized prompt for image generation
-        style: Visual style applied
-        aspect_ratio: Target aspect ratio (1:1, 16:9, 9:16, 4:5)
-        platform: Target social platform
-        negative_prompt: What to avoid in the image
+        style: Visual style applied (for prompt context, not API parameter)
+        aspect_ratio: Target aspect ratio (1:1, 16:9, 9:16, 4:5, 4:3, 3:4)
+        platform: Target social platform (for dimension reference)
+        negative_prompt: What to avoid in the image (appended to prompt)
+        reference_image_urls: List of image URLs to use as visual references.
+                             Pass logo_url for branded content.
+                             Pass uploaded image URLs to use them as style/content references.
+                             Maximum 3 images recommended.
     
     Returns:
         dict with:
-        - status: "stub" (will be "success" when API is ready)
-        - image_url: None (will be actual URL when API is ready)
-        - prompt_used: The prompt that would be/was used
-        - message: Human-readable status
-        - ready_for_api: True (indicates this is ready for real integration)
+        - status: "success", "error", "filtered", or "stub"
+        - image_url: Public URL of the generated image
+        - image_data_url: Base64 data URL (fallback if upload fails)
+        - prompt_used: The prompt that was used
+        - enhanced_prompt: LLM-enhanced prompt (if enhancement was enabled)
+        - message: Human-readable status message
+        - provider: The backend used (openrouter, vertex_ai, google_ai_studio)
+        - model: The model used (e.g., gemini-3-pro-image-preview)
+    
+    Example with reference images:
+        create_image(
+            prompt="Professional LinkedIn post showing our product",
+            platform="linkedin",
+            reference_image_urls=[
+                "https://...logo.png",      # Include brand logo
+                "https://...product.jpg"    # Use product image as reference
+            ]
+        )
     """
     from app.schemas.image_generation import (
         ImageGenerationResult,
+        ImageProvider as SchemaImageProvider,
         ImageStatus,
         ImageStyle,
         get_platform_dimensions,
     )
+    from app.services.image_gen_service import (
+        get_image_gen_service,
+        ImageProvider,
+        ImageSize,
+    )
     
-    logger.info(f"create_image called (stub) - style: {style}, platform: {platform}")
+    logger.info(f"create_image called - style: {style}, platform: {platform}, aspect_ratio: {aspect_ratio}")
     
     # Map string style to enum
     try:
@@ -291,36 +352,69 @@ async def create_image(
     
     dimensions = get_platform_dimensions(platform, aspect_ratio)
     
-    # TODO: Replace this stub with actual API call
-    # Example integration point for Replicate:
-    # 
-    # import replicate
-    # output = replicate.run(
-    #     "black-forest-labs/flux-schnell",
-    #     input={
-    #         "prompt": prompt,
-    #         "aspect_ratio": aspect_ratio,
-    #         "num_outputs": 1,
-    #     }
-    # )
-    # image_url = output[0]
+    # Get user_id from context for organizing uploads
+    ctx = get_agent_context()
+    user_id = ctx.user_id if ctx else None
+    
+    # Get the image generation service
+    service = get_image_gen_service()
+    
+    # Generate the image (auto-uploads to Supabase Storage)
+    generated = await service.generate_image(
+        prompt=prompt,
+        aspect_ratio=aspect_ratio,
+        image_size=ImageSize.size_2k,  # High quality for social media
+        negative_prompt=negative_prompt if negative_prompt else None,
+        enhance_prompt=True,
+        user_id=user_id,
+        upload_to_storage=True,
+        reference_images=reference_image_urls,  # Pass brand assets as visual references
+    )
+    
+    # Map service provider to schema provider
+    provider_map = {
+        ImageProvider.openrouter: SchemaImageProvider.openrouter,
+        ImageProvider.vertex_ai: SchemaImageProvider.vertex_ai,
+        ImageProvider.google_ai_studio: SchemaImageProvider.google_ai_studio,
+        ImageProvider.stub: SchemaImageProvider.stub,
+    }
+    schema_provider = provider_map.get(generated.provider, SchemaImageProvider.stub)
+    
+    # Determine status and message
+    if generated.success:
+        status = ImageStatus.success
+        message = f"Image generated successfully using Nano Banana Pro ({generated.model})."
+        if generated.image_url:
+            message += " Image saved to cloud storage."
+    elif generated.provider == ImageProvider.stub:
+        status = ImageStatus.stub
+        message = generated.error_message or (
+            f"Image generation not configured. "
+            f"Here's the optimized prompt for {platform} ({dimensions}): {prompt[:200]}..."
+        )
+    elif "safety" in (generated.error_message or "").lower() or "blocked" in (generated.error_message or "").lower():
+        status = ImageStatus.filtered
+        message = generated.error_message or "Image was blocked by safety filters."
+    else:
+        status = ImageStatus.error
+        message = generated.error_message or "Image generation failed."
     
     result = ImageGenerationResult(
-        status=ImageStatus.stub,
-        image_url=None,
+        status=status,
+        image_url=generated.image_url,  # Public URL from Supabase Storage
+        image_data_url=generated.to_data_url() if generated.success and not generated.image_url else None,
         prompt_used=prompt,
+        enhanced_prompt=generated.enhanced_prompt,
         negative_prompt=negative_prompt if negative_prompt else None,
         style=style_enum,
         aspect_ratio=aspect_ratio,
         platform=platform,
         dimensions=dimensions,
+        provider=schema_provider,
+        model=generated.model,
         brand_colors_used=False,
-        message=(
-            f"Image generation is under development. "
-            f"Here's the optimized prompt for {platform} ({dimensions}): "
-            f"\n\n{prompt}"
-        ),
-        ready_for_api=True,
+        message=message,
+        ready_for_api=service.is_available,
     )
     
     return result.model_dump()

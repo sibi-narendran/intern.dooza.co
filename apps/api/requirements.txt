@@ -11,6 +11,9 @@ langgraph>=0.2.53
 langgraph-checkpoint-postgres>=2.0.6
 langgraph-supervisor>=0.0.9
 
+# Google Gen AI SDK (for Nano Banana Pro image generation)
+google-genai>=1.0.0
+
 # Database
 asyncpg>=0.30.0
 psycopg[binary,pool]>=3.2.4

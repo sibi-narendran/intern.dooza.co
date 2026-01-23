@@ -280,6 +280,14 @@ def setup_langgraph_routes(app: FastAPI):
         
         async def event_generator():
             """Generate SSE events with native LangGraph format."""
+            # #region agent log
+            import json as _json
+            _msg_count = len(input_data.get("messages", []))
+            _last_msg = input_data.get("messages", [{}])[-1] if input_data.get("messages") else {}
+            with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
+                _f.write(_json.dumps({"location":"langgraph_api.py:event_generator","message":"Starting stream","data":{"agent":agent_slug,"msg_count":_msg_count,"last_msg_type":_last_msg.get("type","unknown"),"last_msg_content":str(_last_msg.get("content",""))[:200],"thread_id":configurable.get("thread_id")},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,B"})+"\n")
+            # #endregion
+            
             # Set agent context INSIDE the generator so cleanup is guaranteed
             # If we set it outside and StreamingResponse fails to initialize,
             # the context would persist and contaminate subsequent requests
@@ -292,9 +300,9 @@ def setup_langgraph_routes(app: FastAPI):
             # Track final state for structured_response event
             final_state = {}
             
-            # Track content that was already emitted to avoid duplicates
-            # This handles the case where LLM output is streamed AND added to state
-            emitted_content_hashes = set()
+            # Track ALL streamed content to detect streaming vs non-streaming models
+            # This is the proper way to avoid duplicate content emission
+            accumulated_streamed_content = []
             
             try:
                 async for event in graph.astream_events(
@@ -330,6 +338,10 @@ def setup_langgraph_routes(app: FastAPI):
                                     text_parts.append(str(part.text) if part.text is not None else "")
                             content = "".join(text_parts)
                         
+                        # Track streamed content to avoid duplicate emission at end
+                        if content:
+                            accumulated_streamed_content.append(content)
+                        
                         node_name = metadata.get("langgraph_node", "")
                         
                         # Build clean event with extracted content
@@ -344,10 +356,15 @@ def setup_langgraph_routes(app: FastAPI):
                         }
                         yield f"data: {json.dumps(clean_event)}\n\n"
                     
-                    # Handle on_chat_model_end for non-streaming models
+                    # Handle on_chat_model_end for non-streaming models ONLY
+                    # When streaming=True (default), content comes via on_chat_model_stream
                     # When streaming=False, LangGraph emits complete response in on_chat_model_end
-                    # With create_react_agent, there's no string-based routing to filter
+                    # We ONLY emit content here if NO streaming has occurred (non-streaming model)
                     elif event_type == "on_chat_model_end":
+                        # Skip if streaming already happened - content was already sent
+                        if accumulated_streamed_content:
+                            continue
+                        
                         output = event.get("data", {}).get("output")
                         content = ""
                         
@@ -369,10 +386,6 @@ def setup_langgraph_routes(app: FastAPI):
                                 content = "".join(text_parts)
                         
                         if content:
-                            # Track this content to avoid duplicate emission at the end
-                            content_hash = hash(content.strip())
-                            emitted_content_hashes.add(content_hash)
-                            
                             clean_event = {
                                 "event": event_type,
                                 "content": content,
@@ -388,6 +401,12 @@ def setup_langgraph_routes(app: FastAPI):
                     elif event_type in ("on_tool_start", "on_tool_end"):
                         tool_name = event.get("name", "")
                         tool_data = event.get("data", {})
+                        
+                        # #region agent log
+                        import json as _json
+                        with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
+                            _f.write(_json.dumps({"location":"langgraph_api.py:tool_event","message":f"Tool event: {event_type}","data":{"tool_name":tool_name,"event_type":event_type,"tool_data_keys":list(tool_data.keys()) if isinstance(tool_data, dict) else str(type(tool_data))},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,D"})+"\n")
+                        # #endregion
                         
                         # Extract input/output for tools
                         if event_type == "on_tool_start":
@@ -443,10 +462,10 @@ def setup_langgraph_routes(app: FastAPI):
                             }
                             yield f"data: {json.dumps(clean_event)}\n\n"
                 
-                # Emit the final response message from state if not already streamed
-                # With create_react_agent, responses are typically streamed, but we check
-                # in case a non-streaming model was used
-                if final_state:
+                # Final state emission is ONLY needed for non-streaming models
+                # If streaming occurred, content was already sent via on_chat_model_stream
+                # This block is kept as a fallback for edge cases (non-streaming models)
+                if final_state and not accumulated_streamed_content:
                     messages = final_state.get("messages", [])
                     if messages:
                         # Get the last message (the response)
@@ -455,21 +474,18 @@ def setup_langgraph_routes(app: FastAPI):
                             content = last_msg.content
                             # Check if it's an AIMessage with actual content
                             if content and hasattr(last_msg, '__class__') and last_msg.__class__.__name__ == 'AIMessage':
-                                # Don't re-emit if this content was already streamed
-                                content_hash = hash(content.strip())
-                                if content_hash not in emitted_content_hashes:
-                                    response_event = {
-                                        "event": "on_chat_model_end",
-                                        "content": content,
-                                        "metadata": {
-                                            "langgraph_node": "agent",  # Agent node in create_react_agent
-                                            "is_final_response": True,
-                                        },
-                                        "name": f"{agent_slug}_response",
-                                    }
-                                    yield f"data: {json.dumps(response_event)}\n\n"
-                                else:
-                                    logger.debug(f"Skipping duplicate final emission: {content[:50]}...")
+                                response_event = {
+                                    "event": "on_chat_model_end",
+                                    "content": content,
+                                    "metadata": {
+                                        "langgraph_node": "agent",  # Agent node in create_react_agent
+                                        "is_final_response": True,
+                                    },
+                                    "name": f"{agent_slug}_response",
+                                }
+                                yield f"data: {json.dumps(response_event)}\n\n"
+                elif accumulated_streamed_content:
+                    logger.debug(f"Skipping final state emission - content was streamed ({len(accumulated_streamed_content)} chunks)")
                 
                 # Emit structured_response event at end of stream
                 # Note: With create_react_agent, tool results are in ToolMessage objects
@@ -487,6 +503,12 @@ def setup_langgraph_routes(app: FastAPI):
                 
             except Exception as e:
                 logger.error(f"Stream error: {e}", exc_info=True)
+                # #region agent log
+                import json as _json
+                import traceback as _tb
+                with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
+                    _f.write(_json.dumps({"location":"langgraph_api.py:stream_error","message":"Stream exception caught","data":{"error_type":type(e).__name__,"error_msg":str(e),"traceback":_tb.format_exc()[:1000]},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,B,C,D,E"})+"\n")
+                # #endregion
                 yield f"data: {json.dumps({'event': 'error', 'data': {'message': str(e)}})}\n\n"
             finally:
                 # Always cleanup agent context after streaming completes

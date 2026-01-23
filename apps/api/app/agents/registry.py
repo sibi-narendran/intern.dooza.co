@@ -65,7 +65,7 @@ AGENT_REGISTRATIONS: Dict[str, AgentRegistration] = {
         module_path="app.agents.soshie",
         factory_func="get_soshie_app",
         agent_type="supervisor",
-        description="Social Media Lead - tool-calling agent with create_social_content workflow",
+        description="Social Media Lead - research content ideas, generate images, provide strategy",
     ),
     "seomi": AgentRegistration(
         slug="seomi",

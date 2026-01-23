@@ -359,11 +359,66 @@ async def get_competitor_insights(
 
 
 # =============================================================================
+# COMPANY KNOWLEDGE SEARCH TOOL
+# =============================================================================
+
+@tool
+async def search_company_knowledge(
+    query: str,
+    limit: int = 5
+) -> dict:
+    """
+    Search the company's knowledge base for relevant information.
+    
+    Use this to find company-specific context like:
+    - Product details and features
+    - Company policies and guidelines  
+    - Past content and messaging
+    - Internal documentation
+    
+    Args:
+        query: Search terms (e.g., "product features", "pricing")
+        limit: Max results to return (default 5)
+    
+    Returns:
+        dict with:
+        - documents: List of matching docs with title, content, source_type, metadata
+        - count: Number of results found
+    """
+    from app.services.knowledge_service import get_knowledge_service
+    
+    ctx = get_agent_context()
+    if not ctx:
+        logger.warning("No agent context - cannot search knowledge base")
+        return {"error": "no_context", "documents": [], "count": 0}
+    
+    service = get_knowledge_service()
+    org_id = await service.get_user_org_id(ctx.user_id)
+    
+    if not org_id:
+        return {
+            "error": "no_organization",
+            "message": "No organization found",
+            "documents": [],
+            "count": 0
+        }
+    
+    documents = await service.search_knowledge(org_id, query, limit)
+    
+    return {
+        "query": query,
+        "documents": documents,
+        "count": len(documents),
+    }
+
+
+# =============================================================================
 # TOOL EXPORTS
 # =============================================================================
 
 RESEARCH_TOOLS = [
     get_brand_context,
+    search_company_knowledge,
     search_trends,
     get_competitor_insights,
 ]

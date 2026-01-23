@@ -4,7 +4,7 @@ Dooza AI Agents Module
 This module provides AI agents using LangGraph patterns:
 
 Agents:
-- Soshie: Tool-calling agent using create_react_agent with create_social_content tool
+- Soshie: Tool-calling agent for social media research and image generation
 
 Usage:
     from app.agents import get_soshie_app

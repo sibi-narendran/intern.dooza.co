@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-flash-preview"
     
+    # Google Cloud / Vertex AI (fallback for image generation)
+    google_cloud_project: str = ""
+    google_cloud_location: str = "global"
+    
+    # Image Generation - uses OpenRouter by default (via openrouter_api_key)
+    # Model: "gemini-3-pro-image-preview" (Nano Banana Pro)
+    image_gen_model: str = "gemini-3-pro-image-preview"
+    
     # Supabase
     supabase_url: str
     supabase_service_key: str

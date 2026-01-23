@@ -312,6 +312,25 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
+  
+  // Images (for generated content from agents like Soshie)
+  img: ({ src, alt }) => (
+    <img 
+      src={src}
+      alt={alt || 'Generated image'}
+      style={{
+        maxWidth: '100%',
+        borderRadius: '12px',
+        marginTop: '12px',
+        marginBottom: '12px',
+        display: 'block',
+      }}
+      loading="lazy"
+      onError={(e) => {
+        e.currentTarget.style.display = 'none';
+      }}
+    />
+  ),
 }
 
 export default function MarkdownRenderer({ content, className }: MarkdownRendererProps) {

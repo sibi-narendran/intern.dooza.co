@@ -175,6 +175,7 @@ export async function streamChat(
   const decoder = new TextDecoder()
   let buffer = ''
   let structuredResponse: StructuredResponse | null = null
+  let hasReceivedStreamingContent = false  // Track if streaming content was received
   
   try {
     callbacks.onThreadId?.(generatedThreadId)
@@ -237,12 +238,25 @@ export async function streamChat(
             }
           }
           
-          // Handle chat content events
-          else if (eventType === 'on_chat_model_stream' || eventType === 'on_chat_model_end') {
+          // Handle streaming content (primary path for streaming models)
+          else if (eventType === 'on_chat_model_stream') {
             const content = event.content || ''
             if (content) {
+              hasReceivedStreamingContent = true
               callbacks.onToken?.(content)
             }
+          }
+          
+          // Handle non-streaming model content (fallback for streaming=False models)
+          // Only process if no streaming content was received to avoid duplicates
+          else if (eventType === 'on_chat_model_end') {
+            if (!hasReceivedStreamingContent) {
+              const content = event.content || ''
+              if (content) {
+                callbacks.onToken?.(content)
+              }
+            }
+            // If streaming occurred, this event is just a completion signal - ignore content
           }
           
           // Handle tool start events
