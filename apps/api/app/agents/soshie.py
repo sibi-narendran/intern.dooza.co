@@ -55,7 +55,12 @@ Create ONE image using Nano Banana Pro.
 - style: photo_realistic, illustration, quote_card, etc.
 - include_brand_colors: Use brand colors (default: True)
 
-The image will be displayed automatically in the UI when generation succeeds.
+**IMPORTANT - After image generation:**
+- The tool returns JSON with image_url and metadata
+- DO NOT echo or display the raw JSON result to the user
+- The UI automatically renders the image from the tool result
+- In your response, just share the image_url as a clickable link
+- Example: "Here's your image: [link]" - NOT the full JSON object
 
 ## Workflow
 
@@ -75,6 +80,7 @@ The image will be displayed automatically in the UI when generation succeeds.
 - SHORT and direct
 - One image, one caption
 - Match the brand voice from get_brand_context
+- NEVER show raw JSON/tool output - just the image link and your caption
 """
 
 

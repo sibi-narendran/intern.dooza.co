@@ -193,7 +193,7 @@ function LogoCard({ logo, uploading, onUpload, onDelete, inputRef }: LogoCardPro
         style={{ display: 'none' }}
       />
       
-      {logo ? (
+      {logo && logo.public_url ? (
         <div>
           <div style={{
             width: '100%',
@@ -208,7 +208,7 @@ function LogoCard({ logo, uploading, onUpload, onDelete, inputRef }: LogoCardPro
             position: 'relative',
           }}>
             <img
-              src={logo.public_url || ''}
+              src={logo.public_url}
               alt="Brand Logo"
               style={{ maxWidth: '75%', maxHeight: '75%', objectFit: 'contain' }}
             />
@@ -577,6 +577,11 @@ export default function BrandIdentityTab() {
   const [mediaUploading, setMediaUploading] = useState(false)
   const mediaInputRef = useRef<HTMLInputElement>(null)
   
+  // Media name prompt state
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [showNamePrompt, setShowNamePrompt] = useState(false)
+  const [assetName, setAssetName] = useState('')
+  
   // Website extraction state
   const [extracting, setExtracting] = useState(false)
 
@@ -688,25 +693,48 @@ export default function BrandIdentityTab() {
     }
   }, [user, logo])
   
-  // Upload media
-  const handleMediaUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle file selection - show name prompt first
+  const handleMediaSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
     
+    // Store the file and show name prompt
+    setPendingFile(file)
+    // Default name is filename without extension
+    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '')
+    setAssetName(nameWithoutExt)
+    setShowNamePrompt(true)
+    
+    // Clear input so same file can be selected again if needed
+    if (mediaInputRef.current) mediaInputRef.current.value = ''
+  }, [user])
+  
+  // Cancel the name prompt
+  const handleCancelUpload = useCallback(() => {
+    setPendingFile(null)
+    setAssetName('')
+    setShowNamePrompt(false)
+  }, [])
+  
+  // Confirm and upload with the entered name
+  const handleConfirmUpload = useCallback(async () => {
+    if (!pendingFile || !user || !assetName.trim()) return
+    
+    setShowNamePrompt(false)
     setMediaUploading(true)
     
     try {
       let assetType: 'image' | 'video' | 'document' = 'image'
-      if (file.type.startsWith('video/')) assetType = 'video'
-      else if (file.type.startsWith('application/')) assetType = 'document'
+      if (pendingFile.type.startsWith('video/')) assetType = 'video'
+      else if (pendingFile.type.startsWith('application/')) assetType = 'document'
       
-      const fileExt = file.name.split('.').pop()
+      const fileExt = pendingFile.name.split('.').pop()
       const fileName = `${assetType}-${Date.now()}.${fileExt}`
       const filePath = `${user.id}/${assetType}/${fileName}`
       
       const { error: uploadError } = await supabase.storage
         .from('brand-assets')
-        .upload(filePath, file)
+        .upload(filePath, pendingFile)
       
       if (uploadError) throw uploadError
       
@@ -716,11 +744,11 @@ export default function BrandIdentityTab() {
       
       const newAsset = await createBrandAsset({
         asset_type: assetType,
-        name: file.name,
+        name: assetName.trim(),  // Use the user-entered name
         file_path: filePath,
         public_url: publicUrl,
-        file_size: file.size,
-        mime_type: file.type,
+        file_size: pendingFile.size,
+        mime_type: pendingFile.type,
       })
       
       setAssets(prev => [newAsset, ...prev])
@@ -729,9 +757,10 @@ export default function BrandIdentityTab() {
       setError('Failed to upload media')
     } finally {
       setMediaUploading(false)
-      if (mediaInputRef.current) mediaInputRef.current.value = ''
+      setPendingFile(null)
+      setAssetName('')
     }
-  }, [user])
+  }, [user, pendingFile, assetName])
   
   // Delete asset
   const handleDeleteAsset = useCallback(async (assetId: string) => {
@@ -1127,11 +1156,138 @@ export default function BrandIdentityTab() {
           loading={assetsLoading}
           uploading={mediaUploading}
           deletingId={deletingAsset}
-          onUpload={handleMediaUpload}
+          onUpload={handleMediaSelect}
           onDelete={handleDeleteAsset}
           inputRef={mediaInputRef}
         />
       </div>
+      
+      {/* Name Prompt Dialog */}
+      {showNamePrompt && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '24px',
+            width: '400px',
+            maxWidth: '90vw',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+          }}>
+            <h3 style={{
+              fontSize: '18px',
+              fontWeight: '600',
+              color: 'var(--gray-900)',
+              margin: '0 0 8px 0',
+            }}>
+              Name this asset
+            </h3>
+            <p style={{
+              fontSize: '14px',
+              color: 'var(--gray-500)',
+              margin: '0 0 20px 0',
+            }}>
+              Give a descriptive name to help AI find and use this media.
+            </p>
+            
+            <input
+              type="text"
+              value={assetName}
+              onChange={(e) => setAssetName(e.target.value)}
+              placeholder="e.g., Company logo dark, Team photo 2024, Product hero image"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && assetName.trim()) {
+                  handleConfirmUpload()
+                } else if (e.key === 'Escape') {
+                  handleCancelUpload()
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                border: '1.5px solid var(--gray-200)',
+                borderRadius: '10px',
+                fontSize: '14px',
+                outline: 'none',
+                marginBottom: '20px',
+              }}
+            />
+            
+            {pendingFile && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '12px',
+                background: 'var(--gray-50)',
+                borderRadius: '10px',
+                marginBottom: '20px',
+              }}>
+                <Image size={20} style={{ color: 'var(--gray-400)' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: '13px',
+                    color: 'var(--gray-700)',
+                    fontWeight: '500',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {pendingFile.name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
+                    {(pendingFile.size / 1024).toFixed(1)} KB
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleCancelUpload}
+                style={{
+                  padding: '10px 20px',
+                  background: 'var(--gray-100)',
+                  color: 'var(--gray-600)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmUpload}
+                disabled={!assetName.trim()}
+                style={{
+                  padding: '10px 20px',
+                  background: assetName.trim() 
+                    ? 'linear-gradient(135deg, var(--primary-500), var(--primary-600))' 
+                    : 'var(--gray-200)',
+                  color: assetName.trim() ? 'white' : 'var(--gray-400)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: assetName.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

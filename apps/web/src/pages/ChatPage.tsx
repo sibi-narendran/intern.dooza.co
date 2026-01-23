@@ -24,11 +24,9 @@ import { getAgentDetails, GalleryAgent } from '../lib/agent-api'
 import { 
   streamChat, 
   generateMessageId, 
-  saveMessage,
   loadThreadMessages,
   listThreads,
-  flushRetryQueue,
-  type SavedMessage,
+  type LangGraphMessage,
 } from '../lib/chat-api'
 import type { 
   ChatMessage, 
@@ -41,7 +39,6 @@ import {
   isTaskCreatedAction, 
   isPublishResultAction,
 } from '../lib/chat-types'
-import { getQueuedMessageCount } from '../lib/persistence'
 import AgentPanel from '../components/AgentPanel'
 import MarkdownRenderer from '../components/MarkdownRenderer'
 import { DynamicToolRenderer, ImageResultCard, isImageResult } from '../components/tools'
@@ -124,21 +121,19 @@ function ToolIndicator({ tool }: { tool: ToolCall }) {
       
       {isExpanded && hasResult && (
         <div className="tool-indicator__content">
-          <DynamicToolRenderer data={parsedResult} schema={uiSchema || null} />
+          {/* Image generation gets special card */}
+          {tool.name === 'generate_image' && isImageResult(parsedResult) ? (
+            <ImageResultCard data={parsedResult} />
+          ) : (
+            <DynamicToolRenderer data={parsedResult} schema={uiSchema || null} />
+          )}
         </div>
       )}
       
-      {/* Special cards for specific tools */}
+      {/* Special cards for specific tools - always visible */}
       {tool.name === 'request_connect_integration' && isComplete && parsedResult && isIntegrationAction(parsedResult) && (
         <div className="tool-indicator__special-card">
           <IntegrationActionCard data={parsedResult} />
-        </div>
-      )}
-      
-      {/* Image generation result card - Soshie uses generate_image workflow tool */}
-      {tool.name === 'generate_image' && isComplete && parsedResult && isImageResult(parsedResult) && (
-        <div className="tool-indicator__special-card">
-          <ImageResultCard data={parsedResult} />
         </div>
       )}
     </div>
@@ -387,7 +382,6 @@ export default function ChatPage() {
   // Thread and workspace
   const [threadId, setThreadId] = useState<string | null>(null)
   const [showWorkspace, setShowWorkspace] = useState(false)
-  const [pendingCount, setPendingCount] = useState(0)
   
   // Workflow progress
   const [currentWorkflowNode, setCurrentWorkflowNode] = useState<string | null>(null)
@@ -405,25 +399,76 @@ export default function ChatPage() {
     scrollToBottom()
   }, [messages, scrollToBottom])
   
-  // Transform saved messages
-  const transformSavedMessages = useCallback((savedMessages: SavedMessage[]): ChatMessage[] => {
-    return savedMessages.map(msg => ({
-      id: msg.id,
-      role: msg.role as 'user' | 'assistant',
-      content: msg.content,
-      timestamp: new Date(msg.created_at),
-      toolCalls: msg.tool_calls_summary?.map(tc => ({
-        name: tc.name,
-        args: tc.args,
-        status: (tc.status || 'complete') as 'pending' | 'running' | 'complete' | 'error',
-        result: tc.summary ? {
-          overall_score: tc.summary.score,
-          issues_count: tc.summary.issueCount,
-          success: tc.summary.success,
-        } : undefined,
-      })),
-      isStreaming: false,
-    }))
+  // Transform LangGraph messages to ChatMessage format
+  // This preserves full tool results including image_url, status, etc.
+  const transformLangGraphMessages = useCallback((messages: LangGraphMessage[]): ChatMessage[] => {
+    const result: ChatMessage[] = []
+    let currentAssistantMsg: ChatMessage | null = null
+    
+    for (const msg of messages) {
+      if (msg.type === 'human') {
+        // Flush any pending assistant message
+        if (currentAssistantMsg) {
+          result.push(currentAssistantMsg)
+          currentAssistantMsg = null
+        }
+        
+        result.push({
+          id: msg.id,
+          role: 'user',
+          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+          timestamp: new Date(),
+          isStreaming: false,
+        })
+      } 
+      else if (msg.type === 'ai') {
+        // Flush any pending assistant message
+        if (currentAssistantMsg) {
+          result.push(currentAssistantMsg)
+        }
+        
+        // Start new assistant message
+        currentAssistantMsg = {
+          id: msg.id,
+          role: 'assistant',
+          content: typeof msg.content === 'string' ? msg.content : '',
+          timestamp: new Date(),
+          toolCalls: msg.tool_calls?.map(tc => ({
+            name: tc.name,
+            args: tc.args,
+            status: 'running' as const,
+          })),
+          isStreaming: false,
+        }
+      }
+      else if (msg.type === 'tool') {
+        // Tool message contains the full result - attach to current assistant message
+        if (currentAssistantMsg && currentAssistantMsg.toolCalls) {
+          const toolCallId = msg.tool_call_id
+          const toolName = msg.name
+          
+          // Find and update the matching tool call with full result
+          currentAssistantMsg.toolCalls = currentAssistantMsg.toolCalls.map(tc => {
+            // Match by name (more reliable than tool_call_id for display)
+            if (tc.name === toolName && tc.status === 'running') {
+              return {
+                ...tc,
+                status: 'complete' as const,
+                result: msg.content, // Full result including image_url, status, etc.
+              }
+            }
+            return tc
+          })
+        }
+      }
+    }
+    
+    // Flush any remaining assistant message
+    if (currentAssistantMsg) {
+      result.push(currentAssistantMsg)
+    }
+    
+    return result
   }, [])
   
   // Load agent and recent chat
@@ -447,9 +492,10 @@ export default function ChatPage() {
           setLoadingMessages(true)
           
           try {
-            const savedMessages = await loadThreadMessages(mostRecent.thread_id)
-            if (savedMessages.length > 0) {
-              const chatMessages = transformSavedMessages(savedMessages)
+            // Load from LangGraph checkpointer - returns full messages with tool results
+            const langGraphMessages = await loadThreadMessages(agentSlug, mostRecent.thread_id)
+            if (langGraphMessages.length > 0) {
+              const chatMessages = transformLangGraphMessages(langGraphMessages)
               setMessages(chatMessages)
             }
           } catch (msgErr) {
@@ -459,10 +505,6 @@ export default function ChatPage() {
           }
         }
         
-        flushRetryQueue().then(() => {
-          setPendingCount(getQueuedMessageCount())
-        }).catch(console.warn)
-        
       } catch (err) {
         console.error('Failed to load agent:', err)
         setLoading(false)
@@ -471,17 +513,10 @@ export default function ChatPage() {
     
     loadAgentAndRecentChat()
     document.title = `Chat with ${agentSlug} | Dooza`
-  }, [agentSlug, transformSavedMessages])
-  
-  // Update pending count
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setPendingCount(getQueuedMessageCount())
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [])
+  }, [agentSlug, transformLangGraphMessages])
   
   // Handle send message
+  // LangGraph checkpointer auto-persists messages - no manual save needed
   const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming || !agentSlug) return
     
@@ -510,19 +545,12 @@ export default function ChatPage() {
     setIsStreaming(true)
     setError(null)
     
-    const userMessageContent = userMessage.content
-    let userMessageSaved = false
-    let receivedThreadId: string | null = null
-    let finalAssistantContent = ''
-    let finalToolCalls: ToolCall[] = []
-    
     try {
       const result = await streamChat(
         agentSlug,
         userMessage.content,
         {
           onToken: (content) => {
-            finalAssistantContent += content
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               return { ...msg, content: msg.content + content }
@@ -531,7 +559,6 @@ export default function ChatPage() {
           
           onToolStart: (toolName, args) => {
             const newTool: ToolCall = { name: toolName, args, status: 'running' }
-            finalToolCalls.push(newTool)
             
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
@@ -540,12 +567,6 @@ export default function ChatPage() {
           },
           
           onToolEnd: (toolName, result, uiSchema) => {
-            finalToolCalls = finalToolCalls.map(t => 
-              t.name === toolName && t.status === 'running'
-                ? { ...t, status: 'complete', result, ui_schema: uiSchema }
-                : t
-            )
-            
             setMessages(prev => prev.map((msg, idx) => {
               if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
               return {
@@ -570,26 +591,15 @@ export default function ChatPage() {
           onStructuredResponse: (response: StructuredResponse) => {
             // Update message with UI actions from backend
             if (response.ui_actions && response.ui_actions.length > 0) {
-            setMessages(prev => prev.map((msg, idx) => {
-              if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
+              setMessages(prev => prev.map((msg, idx) => {
+                if (idx !== prev.length - 1 || msg.role !== 'assistant') return msg
                 return { ...msg, uiActions: response.ui_actions }
-            }))
+              }))
             }
           },
           
           onThreadId: (id) => {
             setThreadId(id)
-            receivedThreadId = id
-            
-            if (!userMessageSaved) {
-              userMessageSaved = true
-              saveMessage({
-                threadId: id,
-                agentSlug,
-                role: 'user',
-                content: userMessageContent,
-              }).catch(console.warn)
-            }
           },
           
           onError: (err) => {
@@ -620,44 +630,14 @@ export default function ChatPage() {
           : msg
       ))
       
-      const finalThreadId = result.threadId || receivedThreadId
-      
-      if (finalThreadId) {
-        setThreadId(finalThreadId)
-        
-        if (!userMessageSaved) {
-          userMessageSaved = true
-          saveMessage({
-            threadId: finalThreadId,
-            agentSlug,
-            role: 'user',
-            content: userMessageContent,
-          }).catch(console.warn)
-        }
-        
-        if (finalAssistantContent) {
-          saveMessage({
-            threadId: finalThreadId,
-            agentSlug,
-            role: 'assistant',
-            content: finalAssistantContent,
-            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
-          }).catch(console.warn)
-        }
+      // Update thread ID from result
+      if (result.threadId) {
+        setThreadId(result.threadId)
       }
+      
     } catch (err) {
       console.error('Chat error:', err)
       setError(err instanceof Error ? err.message : 'Failed to send message')
-      
-      if (!userMessageSaved) {
-        userMessageSaved = true
-        saveMessage({
-          threadId: currentThreadId,
-          agentSlug,
-          role: 'user',
-          content: userMessageContent,
-        }).catch(console.warn)
-      }
     } finally {
       setIsStreaming(false)
     }
@@ -673,13 +653,16 @@ export default function ChatPage() {
   
   // Thread selection
   const handleSelectThread = useCallback(async (selectedThreadId: string) => {
+    if (!agentSlug) return
+    
     setThreadId(selectedThreadId)
     setLoadingMessages(true)
     setError(null)
     
     try {
-      const savedMessages = await loadThreadMessages(selectedThreadId)
-      const chatMessages = transformSavedMessages(savedMessages)
+      // Load from LangGraph checkpointer
+      const langGraphMessages = await loadThreadMessages(agentSlug, selectedThreadId)
+      const chatMessages = transformLangGraphMessages(langGraphMessages)
       setMessages(chatMessages)
     } catch (err) {
       console.error('Failed to load thread:', err)
@@ -687,7 +670,7 @@ export default function ChatPage() {
     } finally {
       setLoadingMessages(false)
     }
-  }, [transformSavedMessages])
+  }, [agentSlug, transformLangGraphMessages])
   
   // New chat
   const handleNewChat = useCallback(() => {
@@ -784,14 +767,6 @@ export default function ChatPage() {
               <div className="chat-page__error">
                 <AlertCircle size={16} />
                 {error}
-              </div>
-            )}
-            
-            {/* Pending indicator */}
-            {pendingCount > 0 && (
-              <div className="chat-page__pending-banner">
-                <AlertCircle size={14} />
-                {pendingCount} message(s) pending sync
               </div>
             )}
             

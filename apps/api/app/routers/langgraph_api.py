@@ -16,24 +16,120 @@ This is the recommended self-hosted pattern:
 Endpoints:
 - POST /langserve/{agent_slug}/invoke - Synchronous invoke
 - POST /langserve/{agent_slug}/stream_events - Native LangGraph event streaming
+- GET /langserve/{agent_slug}/history - Get conversation history from checkpointer
+- GET /langserve/{agent_slug}/threads - List user's conversation threads
 - GET /langserve/{agent_slug}/input_schema - Input schema for documentation
 - GET /langserve/agents - List available agents
 """
 
 import json
 import logging
-from typing import Any, Dict, Optional
-from fastapi import FastAPI, Request, HTTPException, Header
+from typing import Any, Dict, List, Optional
+from fastapi import FastAPI, Request, HTTPException, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.agents.registry import get_agent_registry
-from app.core.database import get_checkpointer
+from app.core.database import get_checkpointer, get_supabase_client
 from app.core.auth import get_current_user
 from app.tools.registry import get_tool_registry
 from app.tools.task import set_agent_context, clear_agent_context
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# MESSAGE TRANSFORMATION (LangGraph -> Frontend Format)
+# =============================================================================
+
+def _transform_langgraph_messages(messages: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Transform LangGraph messages (HumanMessage, AIMessage, ToolMessage) to frontend format.
+    
+    This preserves full tool results including image_url, status, etc.
+    Messages are returned in natural order (as they occurred in conversation).
+    
+    Args:
+        messages: List of LangGraph message objects
+        
+    Returns:
+        List of dicts in frontend-friendly format
+    """
+    result = []
+    
+    for msg in messages:
+        msg_type = msg.__class__.__name__
+        
+        if msg_type == "HumanMessage":
+            result.append({
+                "id": getattr(msg, "id", None) or str(id(msg)),
+                "role": "user",
+                "content": _extract_content(msg.content),
+                "type": "human",
+            })
+        
+        elif msg_type == "AIMessage":
+            # AIMessage may have tool_calls
+            tool_calls = []
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tool_calls.append({
+                        "id": tc.get("id", ""),
+                        "name": tc.get("name", ""),
+                        "args": tc.get("args", {}),
+                    })
+            
+            result.append({
+                "id": getattr(msg, "id", None) or str(id(msg)),
+                "role": "assistant",
+                "content": _extract_content(msg.content),
+                "type": "ai",
+                "tool_calls": tool_calls if tool_calls else None,
+            })
+        
+        elif msg_type == "ToolMessage":
+            # ToolMessage contains the full result from tool execution
+            # This is where image_url, status, etc. are stored
+            content = msg.content
+            
+            # Try to parse JSON content
+            parsed_content = content
+            if isinstance(content, str):
+                try:
+                    parsed_content = json.loads(content)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            
+            result.append({
+                "id": getattr(msg, "id", None) or str(id(msg)),
+                "role": "tool",
+                "content": parsed_content,
+                "type": "tool",
+                "tool_call_id": getattr(msg, "tool_call_id", None),
+                "name": getattr(msg, "name", None),
+            })
+    
+    return result
+
+
+def _extract_content(content: Any) -> str:
+    """Extract string content from various message content formats."""
+    if isinstance(content, str):
+        return content
+    
+    if isinstance(content, list):
+        # Handle list content format (used by some providers)
+        text_parts = []
+        for part in content:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict) and "text" in part:
+                text_parts.append(str(part["text"]) if part["text"] else "")
+            elif hasattr(part, "text"):
+                text_parts.append(str(part.text) if part.text else "")
+        return "".join(text_parts)
+    
+    return str(content) if content else ""
 
 
 def _get_tool_ui_schema(tool_name: str) -> Optional[Dict[str, Any]]:
@@ -571,6 +667,236 @@ def setup_langgraph_routes(app: FastAPI):
             },
             "required": ["input", "config"]
         }
+    
+    
+    @app.get("/langserve/{agent_slug}/history")
+    async def get_conversation_history(
+        agent_slug: str,
+        thread_id: str = Query(..., description="Thread ID to load history for"),
+        authorization: str = Header(...),
+    ):
+        """
+        Get conversation history from LangGraph checkpointer.
+        
+        This is the standard LangGraph way to retrieve conversation state.
+        Returns full message history including complete tool results with image_url, etc.
+        
+        Path parameters:
+            agent_slug: Agent identifier (e.g., 'soshie')
+            
+        Query parameters:
+            thread_id: The conversation thread ID
+            
+        Returns:
+            messages: List of messages in frontend-friendly format
+            thread_id: The thread ID
+        """
+        # Authenticate user
+        user_id = await get_current_user(authorization)
+        
+        # Get the agent graph
+        graph = _get_agent_graph(agent_slug)
+        
+        # Get state from checkpointer
+        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        
+        try:
+            state = await graph.aget_state(config)
+            
+            if not state or not state.values:
+                return {"messages": [], "thread_id": thread_id}
+            
+            # Get messages from state
+            messages = state.values.get("messages", [])
+            
+            # Transform to frontend format
+            transformed = _transform_langgraph_messages(messages)
+            
+            return {
+                "messages": transformed,
+                "thread_id": thread_id,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get conversation history: {e}", exc_info=True)
+            # Return empty on error (thread might not exist yet)
+            return {"messages": [], "thread_id": thread_id}
+    
+    
+    @app.get("/langserve/{agent_slug}/threads")
+    async def list_user_threads(
+        agent_slug: str,
+        limit: int = Query(20, ge=1, le=100),
+        offset: int = Query(0, ge=0),
+        authorization: str = Header(...),
+    ):
+        """
+        List user's conversation threads for an agent.
+        
+        Uses a lightweight user_threads tracking table to map user -> thread ownership.
+        Then fetches preview info from LangGraph checkpointer.
+        
+        Path parameters:
+            agent_slug: Agent identifier (e.g., 'soshie')
+            
+        Query parameters:
+            limit: Max threads to return (default 20)
+            offset: Pagination offset
+            
+        Returns:
+            threads: List of thread summaries
+            total: Total count
+            has_more: Whether there are more threads
+        """
+        # Authenticate user
+        user_id = await get_current_user(authorization)
+        
+        # Query user_threads table for this user + agent
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(
+                status_code=503,
+                detail="Database not available"
+            )
+        
+        try:
+            # Query threads owned by this user for this agent
+            result = supabase.table("user_threads").select(
+                "thread_id, agent_slug, title, created_at, updated_at",
+                count="exact"
+            ).eq("user_id", user_id).eq("agent_slug", agent_slug).order(
+                "updated_at", desc=True
+            ).range(offset, offset + limit - 1).execute()
+            
+            threads = []
+            for row in (result.data or []):
+                threads.append({
+                    "thread_id": row["thread_id"],
+                    "agent_slug": row["agent_slug"],
+                    "title": row.get("title", "New conversation"),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                })
+            
+            total = result.count or len(threads)
+            has_more = offset + len(threads) < total
+            
+            return {
+                "threads": threads,
+                "total": total,
+                "has_more": has_more,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to list threads: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to list conversations"
+            )
+    
+    
+    @app.post("/langserve/{agent_slug}/threads")
+    async def register_thread(
+        agent_slug: str,
+        request: Request,
+        authorization: str = Header(...),
+    ):
+        """
+        Register a new thread for user tracking.
+        
+        Called by frontend when starting a new conversation.
+        This creates the user -> thread ownership mapping.
+        
+        Request body:
+            thread_id: The thread ID
+            title: Optional title (defaults to first message)
+        """
+        # Authenticate user
+        user_id = await get_current_user(authorization)
+        
+        body = await request.json()
+        thread_id = body.get("thread_id")
+        title = body.get("title", "New conversation")
+        
+        if not thread_id:
+            raise HTTPException(status_code=400, detail="thread_id is required")
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        try:
+            # Upsert thread record
+            result = supabase.table("user_threads").upsert({
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "agent_slug": agent_slug,
+                "title": title[:200] if title else "New conversation",
+            }, on_conflict="thread_id").execute()
+            
+            return {"success": True, "thread_id": thread_id}
+            
+        except Exception as e:
+            logger.error(f"Failed to register thread: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to register thread")
+    
+    
+    @app.patch("/langserve/{agent_slug}/threads/{thread_id}")
+    async def update_thread(
+        agent_slug: str,
+        thread_id: str,
+        request: Request,
+        authorization: str = Header(...),
+    ):
+        """Update thread metadata (title, etc.)."""
+        user_id = await get_current_user(authorization)
+        body = await request.json()
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        try:
+            updates = {}
+            if "title" in body:
+                updates["title"] = body["title"][:200]
+            
+            if updates:
+                supabase.table("user_threads").update(updates).eq(
+                    "thread_id", thread_id
+                ).eq("user_id", user_id).execute()
+            
+            return {"success": True}
+            
+        except Exception as e:
+            logger.error(f"Failed to update thread: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to update thread")
+    
+    
+    @app.delete("/langserve/{agent_slug}/threads/{thread_id}")
+    async def delete_thread(
+        agent_slug: str,
+        thread_id: str,
+        authorization: str = Header(...),
+    ):
+        """Delete a thread (removes user tracking, checkpointer data remains)."""
+        user_id = await get_current_user(authorization)
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        try:
+            supabase.table("user_threads").delete().eq(
+                "thread_id", thread_id
+            ).eq("user_id", user_id).execute()
+            
+            return {"success": True}
+            
+        except Exception as e:
+            logger.error(f"Failed to delete thread: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to delete thread")
+    
     
     logger.info("LangGraph API routes added at /langserve/{agent_slug}/*")
     logger.info(f"Available agents: {registry.list_supervisors()}")

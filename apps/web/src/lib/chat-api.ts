@@ -2,8 +2,7 @@
  * Chat API Client
  * 
  * Uses standard LangGraph streaming via /stream_events endpoint.
- * Simplified architecture - backend emits structured UI actions,
- * frontend renders directly without reconstruction.
+ * Message persistence is handled by LangGraph checkpointer (single source of truth).
  * 
  * Production-ready with:
  * - Type-safe event handling
@@ -11,19 +10,9 @@
  * - Proper error recovery
  * - Connection cleanup
  * - Request timeouts
- * - Message persistence with retry queue
  */
 
 import { supabase } from './supabase'
-import {
-  compressToolCalls,
-  queueMessageForRetry,
-  removeFromRetryQueue,
-  getMessagesToRetry,
-  markMessagesRetried,
-  clearRetryQueueForThread,
-  type ToolCallSummary,
-} from './persistence'
 import type { 
   ChatStreamCallbacks, 
   ToolCall,
@@ -37,7 +26,7 @@ const MAX_MESSAGE_LENGTH = 32000
 const REQUEST_TIMEOUT_MS = 120000 // 2 minutes for long-running operations
 
 // ============================================================================
-// Types (for backward compatibility)
+// Types
 // ============================================================================
 
 export interface Message {
@@ -55,6 +44,31 @@ export interface ChatCallbacks extends ChatStreamCallbacks {
   onDelegate?: (toAgent: string) => void
   onAgentSwitch?: (agent: string) => void
   onStatus?: (status: string) => void
+}
+
+/**
+ * LangGraph message format returned from history endpoint.
+ */
+export interface LangGraphMessage {
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  content: string | Record<string, unknown>
+  type: 'human' | 'ai' | 'tool'
+  tool_calls?: Array<{
+    id: string
+    name: string
+    args: Record<string, unknown>
+  }>
+  tool_call_id?: string
+  name?: string  // Tool name for tool messages
+}
+
+export interface ThreadSummary {
+  thread_id: string
+  agent_slug: string
+  title: string
+  created_at: string
+  updated_at: string
 }
 
 // Re-export types from chat-types
@@ -97,10 +111,8 @@ function validateMessage(message: string): void {
 /**
  * Stream a chat message using LangGraph's /stream_events endpoint.
  * 
- * Simplified flow:
- * 1. Stream tokens and tool events
- * 2. Receive structured_response at stream end with UI actions
- * 3. Frontend renders UI actions directly
+ * LangGraph checkpointer automatically persists the conversation.
+ * No manual save required.
  * 
  * @param agentSlug - The agent to chat with (e.g., 'soshie')
  * @param message - The user's message
@@ -126,6 +138,11 @@ export async function streamChat(
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   
   const generatedThreadId = threadId || `thread_${Date.now()}`
+  
+  // Register thread for new conversations
+  if (!threadId) {
+    registerThread(agentSlug, generatedThreadId, message.slice(0, 100)).catch(console.warn)
+  }
   
   const payload = {
     input: {
@@ -175,7 +192,7 @@ export async function streamChat(
   const decoder = new TextDecoder()
   let buffer = ''
   let structuredResponse: StructuredResponse | null = null
-  let hasReceivedStreamingContent = false  // Track if streaming content was received
+  let hasReceivedStreamingContent = false
   
   try {
     callbacks.onThreadId?.(generatedThreadId)
@@ -210,7 +227,7 @@ export async function streamChat(
           const eventType = event.event
           const metadata = event.metadata || {}
           
-          // Handle structured_response event (new simplified flow)
+          // Handle structured_response event
           if (eventType === 'structured_response') {
             structuredResponse = event as StructuredResponse
             callbacks.onStructuredResponse?.(structuredResponse)
@@ -221,8 +238,8 @@ export async function streamChat(
           if (eventType === 'on_chain_start') {
             const langgraphNode = metadata.langgraph_node
             if (langgraphNode) {
-            const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
-            if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
+              const internalNodes = ['model', 'agent', '__start__', '__end__', 'LangGraph']
+              if (!internalNodes.includes(langgraphNode) && !event.name?.startsWith('RunnableSequence')) {
                 callbacks.onNodeStart?.(langgraphNode)
               }
             }
@@ -238,7 +255,7 @@ export async function streamChat(
             }
           }
           
-          // Handle streaming content (primary path for streaming models)
+          // Handle streaming content
           else if (eventType === 'on_chat_model_stream') {
             const content = event.content || ''
             if (content) {
@@ -247,8 +264,7 @@ export async function streamChat(
             }
           }
           
-          // Handle non-streaming model content (fallback for streaming=False models)
-          // Only process if no streaming content was received to avoid duplicates
+          // Handle non-streaming model content (fallback)
           else if (eventType === 'on_chat_model_end') {
             if (!hasReceivedStreamingContent) {
               const content = event.content || ''
@@ -256,7 +272,6 @@ export async function streamChat(
                 callbacks.onToken?.(content)
               }
             }
-            // If streaming occurred, this event is just a completion signal - ignore content
           }
           
           // Handle tool start events
@@ -264,7 +279,6 @@ export async function streamChat(
             const toolName = event.name || ''
             const toolInput = event.input || {}
             
-            // Check for delegation (legacy support)
             if (toolName.startsWith('transfer_to_')) {
               const targetAgent = toolName.replace('transfer_to_', '')
               callbacks.onDelegate?.(targetAgent)
@@ -279,7 +293,6 @@ export async function streamChat(
             const toolOutput = event.output
             const uiSchema = event.ui_schema
             
-            // Skip delegation tool outputs
             if (toolName.startsWith('transfer_to_')) {
               continue
             }
@@ -299,6 +312,11 @@ export async function streamChat(
     }
   } finally {
     reader.releaseLock()
+  }
+  
+  // Update thread title with first message if this was a new conversation
+  if (!threadId) {
+    updateThreadTitle(agentSlug, generatedThreadId, message.slice(0, 100)).catch(console.warn)
   }
   
   return { 
@@ -346,110 +364,83 @@ export function formatAgentName(agentName: string): string {
 
 
 // ============================================================================
-// Message Persistence API
+// Thread Management API (LangGraph-backed)
 // ============================================================================
 
 /**
- * Response types from the messages API.
+ * Register a new thread for tracking.
+ * Called when starting a new conversation.
+ * 
+ * @returns true if registration succeeded, false otherwise
  */
-export interface SavedMessage {
-  id: string
-  thread_id: string
-  role: 'user' | 'assistant'
-  content: string
-  tool_calls_summary?: ToolCallSummary[]
-  created_at: string
-}
-
-export interface ThreadSummary {
-  thread_id: string
-  agent_slug: string
-  title: string
-  last_message_preview: string
-  message_count: number
-  created_at: string
-  updated_at: string
-}
-
-export interface SaveMessageRequest {
-  threadId: string
-  agentSlug: string
-  role: 'user' | 'assistant'
-  content: string
-  toolCalls?: ToolCall[]
-}
-
-/**
- * Save a message to the backend.
- * On failure, queues the message for retry.
- */
-export async function saveMessage(message: SaveMessageRequest): Promise<SavedMessage | null> {
-  const messageId = generateMessageId()
+async function registerThread(agentSlug: string, threadId: string, title: string): Promise<boolean> {
+  console.log('[Chat] Registering thread:', threadId, 'for agent:', agentSlug)
   
   try {
     const token = await getAuthToken()
+    console.log('[Chat] Got auth token, making POST request...')
     
-    const toolCallsSummary = message.toolCalls 
-      ? compressToolCalls(message.toolCalls)
-      : undefined
-    
-    const response = await fetch(`${API_BASE}/v1/messages`, {
+    const response = await fetch(`${API_BASE}/langserve/${agentSlug}/threads`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        thread_id: message.threadId,
-        agent_slug: message.agentSlug,
-        role: message.role,
-        content: message.content,
-        tool_calls_summary: toolCallsSummary,
+        thread_id: threadId,
+        title: title || 'New conversation',
       }),
     })
     
+    console.log('[Chat] Thread registration response:', response.status, response.statusText)
+    
     if (!response.ok) {
-      throw new Error(`Failed to save message: ${response.statusText}`)
+      const errorData = await response.json().catch(() => ({}))
+      console.error('[Chat] Thread registration failed:', response.status, errorData)
+      return false
     }
     
-    return await response.json()
-    
+    console.log('[Chat] Thread registered successfully:', threadId)
+    return true
   } catch (error) {
-    console.warn('Failed to save message, queuing for retry:', error)
-    
-    queueMessageForRetry({
-      id: messageId,
-      threadId: message.threadId,
-      agentSlug: message.agentSlug,
-      role: message.role,
-      content: message.content,
-      toolCallsSummary: message.toolCalls 
-        ? compressToolCalls(message.toolCalls)
-        : undefined,
-    })
-    
-    return null
+    console.error('[Chat] Thread registration error:', error)
+    return false
   }
 }
 
 /**
- * Save a message without retry (fire and forget).
+ * Update thread title.
  */
-export async function saveMessageAsync(message: SaveMessageRequest): Promise<void> {
-  saveMessage(message).catch(err => {
-    console.warn('Async message save failed:', err)
-  })
+async function updateThreadTitle(agentSlug: string, threadId: string, title: string): Promise<void> {
+  try {
+    const token = await getAuthToken()
+    
+    await fetch(`${API_BASE}/langserve/${agentSlug}/threads/${encodeURIComponent(threadId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title }),
+    })
+  } catch (error) {
+    console.warn('Failed to update thread title:', error)
+  }
 }
 
 /**
- * Load messages for a thread.
+ * Load conversation history from LangGraph checkpointer.
+ * Returns full messages including complete tool results with image_url, etc.
  */
-export async function loadThreadMessages(threadId: string): Promise<SavedMessage[]> {
+export async function loadThreadMessages(
+  agentSlug: string,
+  threadId: string
+): Promise<LangGraphMessage[]> {
   try {
     const token = await getAuthToken()
     
     const response = await fetch(
-      `${API_BASE}/v1/threads/${encodeURIComponent(threadId)}/messages?limit=500`,
+      `${API_BASE}/langserve/${agentSlug}/history?thread_id=${encodeURIComponent(threadId)}`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -465,8 +456,6 @@ export async function loadThreadMessages(threadId: string): Promise<SavedMessage
     }
     
     const data = await response.json()
-    clearRetryQueueForThread(threadId)
-    
     return data.messages || []
     
   } catch (error) {
@@ -479,7 +468,7 @@ export async function loadThreadMessages(threadId: string): Promise<SavedMessage
  * List user's conversation threads.
  */
 export async function listThreads(
-  agentSlug?: string,
+  agentSlug: string,
   limit = 20,
   offset = 0
 ): Promise<{ threads: ThreadSummary[]; total: number; hasMore: boolean }> {
@@ -490,12 +479,9 @@ export async function listThreads(
       limit: limit.toString(),
       offset: offset.toString(),
     })
-    if (agentSlug) {
-      params.set('agent_slug', agentSlug)
-    }
     
     const response = await fetch(
-      `${API_BASE}/v1/threads?${params.toString()}`,
+      `${API_BASE}/langserve/${agentSlug}/threads?${params.toString()}`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -524,12 +510,12 @@ export async function listThreads(
 /**
  * Delete a conversation thread.
  */
-export async function deleteThread(threadId: string): Promise<boolean> {
+export async function deleteThread(agentSlug: string, threadId: string): Promise<boolean> {
   try {
     const token = await getAuthToken()
     
     const response = await fetch(
-      `${API_BASE}/v1/threads/${encodeURIComponent(threadId)}`,
+      `${API_BASE}/langserve/${agentSlug}/threads/${encodeURIComponent(threadId)}`,
       {
         method: 'DELETE',
         headers: {
@@ -538,69 +524,10 @@ export async function deleteThread(threadId: string): Promise<boolean> {
       }
     )
     
-    if (!response.ok) {
-      throw new Error(`Failed to delete thread: ${response.statusText}`)
-    }
-    
-    clearRetryQueueForThread(threadId)
-    
-    return true
+    return response.ok
     
   } catch (error) {
     console.error('Failed to delete thread:', error)
     return false
   }
 }
-
-/**
- * Flush the retry queue by batch saving pending messages.
- */
-export async function flushRetryQueue(): Promise<void> {
-  const messagesToRetry = getMessagesToRetry()
-  
-  if (messagesToRetry.length === 0) {
-    return
-  }
-  
-  console.log(`Flushing retry queue: ${messagesToRetry.length} messages`)
-  
-  try {
-    const token = await getAuthToken()
-    
-    const batchPayload = messagesToRetry.map(m => ({
-      thread_id: m.threadId,
-      agent_slug: m.agentSlug,
-      role: m.role,
-      content: m.content,
-      tool_calls_summary: m.toolCallsSummary,
-    }))
-    
-    const response = await fetch(`${API_BASE}/v1/messages/batch`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ messages: batchPayload }),
-    })
-    
-    if (response.ok) {
-      removeFromRetryQueue(messagesToRetry.map(m => m.id))
-      console.log('Retry queue flushed successfully')
-    } else {
-      markMessagesRetried(messagesToRetry.map(m => m.id))
-      console.warn('Retry queue flush failed, will retry later')
-    }
-    
-  } catch (error) {
-    markMessagesRetried(messagesToRetry.map(m => m.id))
-    console.warn('Retry queue flush error:', error)
-  }
-}
-
-// Re-export persistence utilities for convenience
-export { 
-  compressToolCalls,
-  type ToolCallSummary,
-  type QueuedMessage,
-} from './persistence'

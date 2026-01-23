@@ -330,8 +330,6 @@ export default function ChatHistoryDropdown({
                         color: 'var(--gray-500)',
                       }}>
                         <span>{formatRelativeTime(thread.updated_at)}</span>
-                        <span>•</span>
-                        <span>{thread.message_count} messages</span>
                         {isCurrent && (
                           <>
                             <span>•</span>
