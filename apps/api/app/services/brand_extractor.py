@@ -609,11 +609,12 @@ async def extract_and_save_brand(url: str, org_id: str, user_id: Optional[str] =
     # Fetch HTML
     try:
         html, status_code = await fetch_url(url)
-        if status_code != 200:
-            raise ValueError(f"Failed to fetch URL (HTTP {status_code})")
     except Exception as e:
         logger.error(f"Failed to fetch URL {url}: {e}")
         raise ValueError(f"Could not fetch URL: {e}")
+    
+    if status_code != 200:
+        raise ValueError(f"Failed to fetch URL (HTTP {status_code})")
     
     # Parse HTML
     soup = parse_html(html)

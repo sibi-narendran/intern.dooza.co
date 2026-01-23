@@ -78,5 +78,21 @@ export const agents = [
             'Generate content calendars based on trending topics',
             'Analyze engagement and auto-optimize posting times'
         ]
+    },
+    {
+        id: 'seomi',
+        name: 'Seomi',
+        role: 'SEO Expert',
+        gradient: 'linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)',
+        avatar: 'https://api.dicebear.com/7.x/lorelei/svg?seed=Sarah&backgroundColor=ddd6fe',
+        desc: 'Optimizes your website for search engines and improves rankings.',
+        integrations: ['Google Search Console', 'Google Analytics', 'Ahrefs', 'Semrush'],
+        capabilities: [
+            'Audit your website for SEO issues and provide actionable fixes',
+            'Research keywords and identify ranking opportunities',
+            'Optimize content for better search visibility',
+            'Analyze competitors and find content gaps',
+            'Monitor rankings and track SEO performance'
+        ]
     }
 ];
