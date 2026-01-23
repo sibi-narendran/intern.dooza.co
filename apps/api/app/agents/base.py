@@ -97,13 +97,7 @@ def get_llm(streaming: bool = True, model: Optional[str] = None) -> Any:
     elif provider == "openrouter":
         model_name = model or settings.openrouter_model
         logger.debug(f"Creating OpenRouter LLM: {model_name}")
-        
-        # #region agent log
-        import json as _json
-        with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
-            _f.write(_json.dumps({"location":"base.py:get_llm","message":"Creating OpenRouter LLM","data":{"model":model_name,"streaming":streaming,"provider":"openrouter"},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,E"})+"\n")
-        # #endregion
-        
+
         return ChatOpenAI(
             model=model_name,
             api_key=settings.openrouter_api_key,

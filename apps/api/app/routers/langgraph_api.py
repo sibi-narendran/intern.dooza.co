@@ -376,14 +376,6 @@ def setup_langgraph_routes(app: FastAPI):
         
         async def event_generator():
             """Generate SSE events with native LangGraph format."""
-            # #region agent log
-            import json as _json
-            _msg_count = len(input_data.get("messages", []))
-            _last_msg = input_data.get("messages", [{}])[-1] if input_data.get("messages") else {}
-            with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
-                _f.write(_json.dumps({"location":"langgraph_api.py:event_generator","message":"Starting stream","data":{"agent":agent_slug,"msg_count":_msg_count,"last_msg_type":_last_msg.get("type","unknown"),"last_msg_content":str(_last_msg.get("content",""))[:200],"thread_id":configurable.get("thread_id")},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,B"})+"\n")
-            # #endregion
-            
             # Set agent context INSIDE the generator so cleanup is guaranteed
             # If we set it outside and StreamingResponse fails to initialize,
             # the context would persist and contaminate subsequent requests
@@ -497,13 +489,7 @@ def setup_langgraph_routes(app: FastAPI):
                     elif event_type in ("on_tool_start", "on_tool_end"):
                         tool_name = event.get("name", "")
                         tool_data = event.get("data", {})
-                        
-                        # #region agent log
-                        import json as _json
-                        with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
-                            _f.write(_json.dumps({"location":"langgraph_api.py:tool_event","message":f"Tool event: {event_type}","data":{"tool_name":tool_name,"event_type":event_type,"tool_data_keys":list(tool_data.keys()) if isinstance(tool_data, dict) else str(type(tool_data))},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,D"})+"\n")
-                        # #endregion
-                        
+
                         # Extract input/output for tools
                         if event_type == "on_tool_start":
                             tool_input = tool_data.get("input", {})
@@ -599,12 +585,6 @@ def setup_langgraph_routes(app: FastAPI):
                 
             except Exception as e:
                 logger.error(f"Stream error: {e}", exc_info=True)
-                # #region agent log
-                import json as _json
-                import traceback as _tb
-                with open("/Users/sibinarendran/codes/workforce.dooza-ai/.cursor/debug.log", "a") as _f:
-                    _f.write(_json.dumps({"location":"langgraph_api.py:stream_error","message":"Stream exception caught","data":{"error_type":type(e).__name__,"error_msg":str(e),"traceback":_tb.format_exc()[:1000]},"timestamp":__import__("time").time()*1000,"sessionId":"debug-session","hypothesisId":"A,B,C,D,E"})+"\n")
-                # #endregion
                 yield f"data: {json.dumps({'event': 'error', 'data': {'message': str(e)}})}\n\n"
             finally:
                 # Always cleanup agent context after streaming completes
