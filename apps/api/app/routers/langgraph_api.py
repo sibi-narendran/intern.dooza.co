@@ -44,71 +44,77 @@ logger = logging.getLogger(__name__)
 
 def _transform_langgraph_messages(messages: List[Any]) -> List[Dict[str, Any]]:
     """
-    Transform LangGraph messages (HumanMessage, AIMessage, ToolMessage) to frontend format.
-    
-    This preserves full tool results including image_url, status, etc.
-    Messages are returned in natural order (as they occurred in conversation).
-    
+    Transform LangGraph messages to Vercel AI SDK UIMessage format.
+
+    This converts LangGraph's separate message format (AIMessage + ToolMessage)
+    into AI SDK's nested format (message.toolInvocations[]).
+
+    LangGraph format:
+        [AIMessage with tool_calls], [ToolMessage], [ToolMessage], [AIMessage]
+
+    AI SDK format:
+        [assistant with toolInvocations], [assistant]
+
     Args:
         messages: List of LangGraph message objects
-        
+
     Returns:
-        List of dicts in frontend-friendly format
+        List of dicts in Vercel AI SDK UIMessage format
     """
     result = []
-    
+    tool_results: Dict[str, Any] = {}  # Map tool_call_id -> result content
+
+    # First pass: collect all tool results by tool_call_id
+    for msg in messages:
+        if msg.__class__.__name__ == "ToolMessage":
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id:
+                content = msg.content
+                # Parse JSON content if string
+                if isinstance(content, str):
+                    try:
+                        content = json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                tool_results[tool_call_id] = content
+
+    # Second pass: build messages with toolInvocations
     for msg in messages:
         msg_type = msg.__class__.__name__
-        
+
         if msg_type == "HumanMessage":
             result.append({
                 "id": getattr(msg, "id", None) or str(id(msg)),
                 "role": "user",
                 "content": _extract_content(msg.content),
-                "type": "human",
             })
-        
+
         elif msg_type == "AIMessage":
-            # AIMessage may have tool_calls
-            tool_calls = []
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    tool_calls.append({
-                        "id": tc.get("id", ""),
-                        "name": tc.get("name", ""),
-                        "args": tc.get("args", {}),
-                    })
-            
-            result.append({
+            message_dict: Dict[str, Any] = {
                 "id": getattr(msg, "id", None) or str(id(msg)),
                 "role": "assistant",
                 "content": _extract_content(msg.content),
-                "type": "ai",
-                "tool_calls": tool_calls if tool_calls else None,
-            })
-        
-        elif msg_type == "ToolMessage":
-            # ToolMessage contains the full result from tool execution
-            # This is where image_url, status, etc. are stored
-            content = msg.content
-            
-            # Try to parse JSON content
-            parsed_content = content
-            if isinstance(content, str):
-                try:
-                    parsed_content = json.loads(content)
-                except (json.JSONDecodeError, ValueError):
-                    pass
-            
-            result.append({
-                "id": getattr(msg, "id", None) or str(id(msg)),
-                "role": "tool",
-                "content": parsed_content,
-                "type": "tool",
-                "tool_call_id": getattr(msg, "tool_call_id", None),
-                "name": getattr(msg, "name", None),
-            })
-    
+            }
+
+            # Convert tool_calls to toolInvocations (AI SDK format)
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                tool_invocations = []
+                for tc in msg.tool_calls:
+                    tool_call_id = tc.get("id", "")
+                    tool_invocations.append({
+                        "toolCallId": tool_call_id,
+                        "toolName": tc.get("name", ""),
+                        "args": tc.get("args", {}),
+                        "state": "result",
+                        "result": tool_results.get(tool_call_id),
+                    })
+                if tool_invocations:
+                    message_dict["toolInvocations"] = tool_invocations
+
+            result.append(message_dict)
+
+        # Skip ToolMessage - already merged into AIMessage.toolInvocations
+
     return result
 
 
